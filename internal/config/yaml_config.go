@@ -35,8 +35,8 @@ type YamlConfig struct {
 	VControlXML string `yaml:"vcontrol_xml" json:"vcontrol_xml"`
 	VitoXML     string `yaml:"vito_xml" json:"vito_xml"`
 
-	// Surcharges d'adresses propres a la machine, appliquees par-dessus
-	// vito.xml sans le modifier. Voir overrides/vitola200-kw2.xml.
+	// Machine-specific address overrides, applied on top of vito.xml without
+	// modifying it. See overrides/vitola200-kw2.xml.
 	VitoOverridesXML string `yaml:"vito_overrides_xml" json:"vito_overrides_xml"`
 	WebPort          string `yaml:"web_port" json:"web_port"`
 	WebMode          bool   `yaml:"web" json:"web"`
@@ -54,18 +54,18 @@ type YamlConfig struct {
 	// MQTT hooks for listening to topics and executing actions
 	MQTTHooks []MQTTHookConfig `yaml:"mqtt_hooks" json:"mqtt_hooks"`
 
-	// Entites climate exposees a Home Assistant (eau chaude, chauffage).
+	// Climate entities exposed to Home Assistant (hot water, heating).
 	Climates []MQTTClimateConfig `yaml:"mqtt_climates" json:"mqtt_climates"`
 
-	// Grandeurs calculees a partir de deux mesures publiees.
+	// Values computed from two published readings.
 	Derived []MQTTDerivedConfig `yaml:"mqtt_derived" json:"mqtt_derived"`
 }
 
-// MQTTDerivedConfig decrit un rapport entre deux mesures deja publiees.
+// MQTTDerivedConfig describes a ratio between two already-published readings.
 //
-// Volontairement limite a un rapport : la seule grandeur derivee utile ici est
-// la duree moyenne d'un cycle de bruleur, et un moteur d'expressions complet
-// serait une dette pour un unique cas d'usage.
+// Deliberately limited to a ratio: the only useful derived value here is the
+// average burner cycle length, and a full expression engine would be a debt
+// taken on for a single use case.
 type MQTTDerivedConfig struct {
 	Alias        string  `yaml:"alias" json:"alias"`
 	FriendlyName string  `yaml:"friendly_name" json:"friendly_name"`
@@ -79,42 +79,47 @@ type MQTTDerivedConfig struct {
 	Precision    int     `yaml:"precision,omitempty" json:"precision,omitempty"`
 }
 
-// MQTTClimateConfig decrit une entite climate Home Assistant.
+// MQTTClimateConfig describes a Home Assistant climate entity.
 //
-// Une entite climate regroupe une consigne reglable, une temperature mesuree
-// et un mode : c'est ce qui permet de piloter depuis un thermostat plutot que
-// depuis un curseur nu.
+// A climate entity ties together an adjustable setpoint, a measured
+// temperature and a mode, which is what turns a bare slider into a
+// thermostat.
 type MQTTClimateConfig struct {
-	Name     string `yaml:"name" json:"name"`
+	Name string `yaml:"name" json:"name"`
+
+	// ObjectID identifies the entity on the wire: it is the node in the
+	// discovery topic and the suffix of unique_id, which is what Home
+	// Assistant keys the entity off. It does not decide the entity_id — that
+	// is derived from Name, as it is for every other entity here.
 	ObjectID string `yaml:"object_id" json:"object_id"`
 	Icon     string `yaml:"icon,omitempty" json:"icon,omitempty"`
 
-	// Alias du topic portant la consigne courante, et adresse a ecrire.
+	// Alias of the topic carrying the current setpoint, and the address to write.
 	TargetAlias   string `yaml:"target_alias" json:"target_alias"`
 	TargetAddress string `yaml:"target_address" json:"target_address"`
 
-	// Alias du topic portant la temperature mesuree. Facultatif : la
-	// regulation KW2 n'expose aucune sonde d'ambiance, et une entite sans
-	// temperature courante reste honnete.
+	// Alias of the topic carrying the measured temperature. Optional: the KW2
+	// controller exposes no room sensor, and an entity without a current
+	// temperature stays honest.
 	CurrentAlias string `yaml:"current_alias,omitempty" json:"current_alias,omitempty"`
 
 	MinTemp  float64 `yaml:"min_temp" json:"min_temp"`
 	MaxTemp  float64 `yaml:"max_temp" json:"max_temp"`
 	TempStep float64 `yaml:"temp_step,omitempty" json:"temp_step,omitempty"`
 
-	// Modes proposes. La regulation n'a qu'un mode global (unite BA) : le
-	// laisser vide expose une entite a consigne seule, ce qui evite de
-	// promettre un pilotage par zone que l'appareil ne sait pas faire.
+	// Offered modes. The controller has a single global mode (unit BA), so
+	// leaving this empty exposes a setpoint-only entity rather than promising
+	// per-zone control the appliance cannot deliver.
 	Modes       []string `yaml:"modes,omitempty" json:"modes,omitempty"`
 	ModeAlias   string   `yaml:"mode_alias,omitempty" json:"mode_alias,omitempty"`
 	ModeAddress string   `yaml:"mode_address,omitempty" json:"mode_address,omitempty"`
 
-	// ModeTemplate traduit l'etat brut du topic de mode en mode HVAC. Sans
-	// lui, Home Assistant place l'entite sur « off » et masque la consigne.
+	// ModeTemplate maps the raw mode topic value onto an HVAC mode. Without
+	// it Home Assistant parks the entity on "off" and hides the setpoint.
 	ModeTemplate string `yaml:"mode_template,omitempty" json:"mode_template,omitempty"`
 
-	// ActionAlias porte l'etat du bruleur : il alimente hvac_action, donc
-	// l'indication « chauffe / en veille » dans Home Assistant.
+	// ActionAlias carries the burner state: it feeds hvac_action, hence the
+	// "heating / idle" indication in Home Assistant.
 	ActionAlias string `yaml:"action_alias,omitempty" json:"action_alias,omitempty"`
 }
 
@@ -149,17 +154,17 @@ type MQTTAddress struct {
 	Address string `yaml:"address" json:"address"` // Hex address like "0x810"
 	Alias   string `yaml:"alias" json:"alias"`     // Topic alias (e.g., "boiler_temp")
 
-	// DeviceClass et StateClass alimentent la decouverte Home Assistant.
-	// Sans state_class, HA n'archive pas l'entite en statistiques long terme
-	// et l'historique disparait au bout de dix jours.
+	// DeviceClass and StateClass feed Home Assistant discovery. Without
+	// state_class, HA keeps the entity out of long-term statistics and the
+	// history disappears after ten days.
 	DeviceClass  string `yaml:"device_class,omitempty" json:"device_class,omitempty"`
 	StateClass   string `yaml:"state_class,omitempty" json:"state_class,omitempty"`
 	Unit         string `yaml:"unit,omitempty" json:"unit,omitempty"`
 	FriendlyName string `yaml:"friendly_name,omitempty" json:"friendly_name,omitempty"`
 
-	// Component choisit le type d'entite Home Assistant : "sensor" (defaut) ou
-	// "binary_sensor". Les etats 0/1 -- bruleur, circulateur -- s'affichent bien
-	// mieux en binary_sensor : « Marche / Arret » plutot qu'un « 0 » nu.
+	// Component picks the Home Assistant entity type: "sensor" (default) or
+	// "binary_sensor". A 0/1 state — burner, pump — reads far better as a
+	// binary sensor: "Running / Not running" rather than a bare "0".
 	Icon       string `yaml:"icon,omitempty" json:"icon,omitempty"`
 	Component  string `yaml:"component,omitempty" json:"component,omitempty"`
 	PayloadOn  string `yaml:"payload_on,omitempty" json:"payload_on,omitempty"`

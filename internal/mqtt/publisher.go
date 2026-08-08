@@ -30,7 +30,7 @@ type Publisher struct {
 	enabled       bool
 	client        mqtt.Client // MQTT client instance
 
-	// Grandeurs calculees a partir des mesures publiees.
+	// Values computed from the published readings.
 	derived        *derivedState
 	derivedConfigs []config.MQTTDerivedConfig
 }
@@ -70,10 +70,9 @@ func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
 func (p *Publisher) initMQTTClient() {
 	clientID := fmt.Sprintf("vcontrold-go-%d", time.Now().Unix())
 
-	// Testament : si le daemon meurt ou perd le reseau, le courtier publie
-	// "offline" a sa place. Sans cela, Home Assistant garderait indefiniment la
-	// derniere valeur retenue et afficherait une chaudiere a l arret comme si la
-	// mesure etait fraiche.
+	// Last will: if the daemon dies or loses the network, the broker publishes
+	// "offline" on its behalf. Without it Home Assistant would keep the last
+	// retained value forever and show a stopped boiler as a fresh reading.
 	availabilityTopic := p.availabilityTopic()
 
 	opts := mqtt.NewClientOptions().
@@ -98,8 +97,8 @@ func (p *Publisher) initMQTTClient() {
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		log.Printf("MQTT: Connected to broker %s", p.config.Host)
 
-		// A poser a chaque (re)connexion : apres une coupure, c'est le
-		// testament "offline" qui est retenu sur le courtier.
+		// Re-asserted on every (re)connection: after a drop it is the
+		// "offline" will that sits retained on the broker.
 		if token := client.Publish(availabilityTopic, 0, true, availabilityOnline); token.Wait() && token.Error() != nil {
 			log.Printf("MQTT: Failed to announce availability: %v", token.Error())
 		}
@@ -234,7 +233,7 @@ func (p *Publisher) publishValue(topic, value string, address uint16, alias stri
 
 	log.Printf("MQTT PUBLISHED: %s = '%s' (0x%04X -> %s) [cleaned from: '%s']", topic, cleanedValue, address, alias, value)
 
-	// Une mesure vient de changer : les grandeurs qui en decoulent aussi.
+	// A reading just changed, so anything derived from it may have too.
 	if p.derived != nil {
 		p.derived.record(alias, cleanedValue)
 		p.publishDerived()
@@ -317,14 +316,7 @@ func (p *Publisher) GetStatus() map[string]interface{} {
 	}
 }
 
-// Etats publies sur le topic de disponibilite, repris tels quels par la
-// decouverte Home Assistant.
-const (
-	availabilityOnline  = "online"
-	availabilityOffline = "offline"
-)
-
-// availabilityTopic rend le topic de disponibilite du daemon.
+// availabilityTopic returns the daemon's availability topic.
 func (p *Publisher) availabilityTopic() string {
 	root := "viessmann"
 	if p.config != nil && p.config.TopicRoot != "" {

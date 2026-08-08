@@ -28,19 +28,19 @@ func TestParseHexAddress(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseHexAddress(tt.input)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("ParseHexAddress(%q) expected error, got nil", tt.input)
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("ParseHexAddress(%q) unexpected error: %v", tt.input, err)
 				return
 			}
-			
+
 			if got != tt.expected {
 				t.Errorf("ParseHexAddress(%q) = 0x%X, expected 0x%X", tt.input, got, tt.expected)
 			}
@@ -67,13 +67,13 @@ func TestAutoRefreshConfig_ValidateAddresses(t *testing.T) {
 			config := &AutoRefreshConfig{
 				Addresses: tt.addresses,
 			}
-			
+
 			err := config.ValidateAddresses()
-			
+
 			if tt.wantErr && err == nil {
 				t.Errorf("ValidateAddresses() expected error, got nil")
 			}
-			
+
 			if !tt.wantErr && err != nil {
 				t.Errorf("ValidateAddresses() unexpected error: %v", err)
 			}
@@ -86,19 +86,19 @@ func TestAutoRefreshConfig_GetAddressesAsUint16(t *testing.T) {
 	config := &AutoRefreshConfig{
 		Addresses: []string{"0x810", "811", "0x812"},
 	}
-	
+
 	addresses, err := config.GetAddressesAsUint16()
 	if err != nil {
 		t.Errorf("GetAddressesAsUint16() unexpected error: %v", err)
 		return
 	}
-	
+
 	expected := []uint16{0x810, 0x811, 0x812}
 	if len(addresses) != len(expected) {
 		t.Errorf("GetAddressesAsUint16() length = %d, expected %d", len(addresses), len(expected))
 		return
 	}
-	
+
 	for i, addr := range addresses {
 		if addr != expected[i] {
 			t.Errorf("GetAddressesAsUint16()[%d] = 0x%X, expected 0x%X", i, addr, expected[i])
@@ -126,19 +126,19 @@ func TestAutoRefreshConfig_GetRefreshDuration(t *testing.T) {
 			config := &AutoRefreshConfig{
 				Interval: tt.interval,
 			}
-			
+
 			duration, err := config.GetRefreshDuration()
-			
+
 			if tt.wantErr && err == nil {
 				t.Errorf("GetRefreshDuration() expected error, got nil")
 				return
 			}
-			
+
 			if !tt.wantErr && err != nil {
 				t.Errorf("GetRefreshDuration() unexpected error: %v", err)
 				return
 			}
-			
+
 			if !tt.wantErr && tt.interval != "" && duration <= 0 && tt.interval != "-5s" {
 				t.Errorf("GetRefreshDuration() = %v, expected positive duration", duration)
 			}

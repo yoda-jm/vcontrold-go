@@ -36,7 +36,7 @@ func TestSerialCommunicator_Constants(t *testing.T) {
 		t.Errorf("KW2_START_BYTE = 0x%02X, expected 0x01", protocol.KW2_START_BYTE)
 	}
 
-	// Opcodes des macros GETADDR (SEND 01 F7) et SETADDR (SEND 01 F4).
+	// Opcodes of the GETADDR (SEND 01 F7) and SETADDR (SEND 01 F4) macros.
 	if protocol.KW2_CMD_READ != 0xF7 {
 		t.Errorf("KW2_CMD_READ = 0x%02X, expected 0xF7", protocol.KW2_CMD_READ)
 	}

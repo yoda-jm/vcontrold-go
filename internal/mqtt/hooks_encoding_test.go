@@ -16,19 +16,19 @@ func TestEncodeLittleEndian(t *testing.T) {
 		want    []byte
 		wantErr bool
 	}{
-		// 48 degres sur un octet : exactement setTempWWsoll, unite ST.
-		{name: "consigne ECS 48 C", value: 48, length: 1, want: []byte{0x30}},
-		{name: "deux octets", value: 480, length: 2, want: []byte{0xE0, 0x01}},
-		{name: "quatre octets", value: 206315, length: 4, want: []byte{0xEB, 0x25, 0x03, 0x00}},
-		{name: "borne haute un octet", value: 255, length: 1, want: []byte{0xFF}},
+		// 48 degrees in one byte: exactly setTempWWsoll, unit ST.
+		{name: "hot water setpoint 48 C", value: 48, length: 1, want: []byte{0x30}},
+		{name: "two bytes", value: 480, length: 2, want: []byte{0xE0, 0x01}},
+		{name: "four bytes", value: 206315, length: 4, want: []byte{0xEB, 0x25, 0x03, 0x00}},
+		{name: "one byte upper bound", value: 255, length: 1, want: []byte{0xFF}},
 
-		// Le cas qui a motive le correctif : 48 x 10 ne tient pas dans un octet.
-		// Tronquer donnerait 224, soit une consigne absurde sur une chaudiere
-		// en service. L'erreur est le seul comportement acceptable.
-		{name: "debordement un octet", value: 480, length: 1, wantErr: true},
-		{name: "valeur negative", value: -1, length: 1, wantErr: true},
-		{name: "longueur nulle", value: 1, length: 0, wantErr: true},
-		{name: "longueur excessive", value: 1, length: 5, wantErr: true},
+		// The case that motivated the fix: 48 x 10 does not fit in a byte.
+		// Truncating would give 224, an absurd setpoint on a boiler in
+		// service. Failing is the only acceptable behaviour.
+		{name: "one byte overflow", value: 480, length: 1, wantErr: true},
+		{name: "negative value", value: -1, length: 1, wantErr: true},
+		{name: "zero length", value: 1, length: 0, wantErr: true},
+		{name: "excessive length", value: 1, length: 5, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -52,8 +52,8 @@ func TestEncodeLittleEndian(t *testing.T) {
 	}
 }
 
-// La longueur d'ecriture doit venir de vito.xml, pas d'une supposition a deux
-// octets : ecrire deux octets sur 0x6300 deborderait sur l'adresse suivante.
+// The write length must come from vito.xml, not from a two-byte assumption:
+// writing two bytes to 0x6300 would overrun the next address.
 func TestWriteLengthFor(t *testing.T) {
 	path, err := filepath.Abs("../../third_party/vcontrold/xml/kw/vito.xml")
 	if err != nil {
@@ -68,11 +68,11 @@ func TestWriteLengthFor(t *testing.T) {
 		want    int
 		comment string
 	}{
-		{0x6300, 1, "setTempWWsoll, unite ST"},
-		{0x2301, 1, "setBetriebArtM1, unite BA"},
-		{0x0802, 2, "getTempKist, unite UT"},
-		{0x08A7, 4, "getBrennerStunden1, unite CS"},
-		{0xDEAD, 1, "adresse inconnue : un octet, le choix le moins destructeur"},
+		{0x6300, 1, "setTempWWsoll, unit ST"},
+		{0x2301, 1, "setBetriebArtM1, unit BA"},
+		{0x0802, 2, "getTempKist, unit UT"},
+		{0x08A7, 4, "getBrennerStunden1, unit CS"},
+		{0xDEAD, 1, "unknown address: one byte, the least destructive default"},
 	}
 
 	for _, tt := range tests {

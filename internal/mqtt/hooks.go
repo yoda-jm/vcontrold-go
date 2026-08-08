@@ -225,10 +225,10 @@ func (hm *HookManager) executeSetTemperature(action config.MQTTHookAction, paylo
 		writeValue = temp * 10
 	}
 
-	// La longueur vient du XML, pas d'une hypothese. setTempWWsoll (0x6300)
-	// fait UN octet, unite ST, sans facteur : ecrire deux octets deborde sur
-	// l'adresse suivante. Ecrire 480 pour 48 degres ne tient meme pas dans un
-	// octet -- d'ou la disparition du transform multiply_10 de la config.
+	// The length comes from the XML, not from an assumption. setTempWWsoll
+	// (0x6300) is ONE byte, unit ST, unscaled: a two-byte write overruns the
+	// next address, and 480 for 48 degrees does not even fit in a byte —
+	// which is why the multiply_10 transform is gone from the config.
 	writeData, err := encodeLittleEndian(int(writeValue+0.5), writeLengthFor(targetAddress))
 	if err != nil {
 		return fmt.Errorf("cannot encode temperature %.1f°C for address 0x%04X: %v", temp, targetAddress, err)
@@ -318,7 +318,7 @@ func (hm *HookManager) executeWriteAddress(action config.MQTTHookAction, payload
 			value *= 10
 		}
 
-		// Longueur issue du XML plutot que supposee a deux octets.
+		// Length taken from the XML rather than assumed to be two bytes.
 		writeData, err = encodeLittleEndian(int(value+0.5), writeLengthFor(targetAddress))
 		if err != nil {
 			return fmt.Errorf("cannot encode value for address 0x%04X: %v", targetAddress, err)
@@ -375,7 +375,7 @@ func (hm *HookManager) executeWriteParameter(action config.MQTTHookAction, paylo
 		value *= 10
 	}
 
-	// Longueur issue du XML plutot que supposee a deux octets.
+	// Length taken from the XML rather than assumed to be two bytes.
 	writeData, err := encodeLittleEndian(int(value+0.5), writeLengthFor(targetAddress))
 	if err != nil {
 		return fmt.Errorf("cannot encode value for parameter '%s' (0x%04X): %v", action.Parameter, targetAddress, err)
@@ -497,10 +497,10 @@ func (hm *HookManager) GetStatus() map[string]interface{} {
 	}
 }
 
-// writeLengthFor rend la longueur d'ecriture d'une adresse d'apres vito.xml,
-// surcharges comprises. Un octet par defaut : c'est le cas le plus courant des
-// consignes, et c'est aussi le choix le moins destructeur -- ecrire trop long
-// deborderait sur l'adresse voisine.
+// writeLengthFor returns an address's write length according to vito.xml,
+// overrides included. One byte by default: that is the common case for
+// setpoints, and it is the least destructive guess — writing too long would
+// overrun the neighbouring address.
 func writeLengthFor(address uint16) int {
 	if mapping, exists := xml.GetAddressMapping(address); exists && mapping.Length > 0 {
 		return mapping.Length
@@ -508,11 +508,10 @@ func writeLengthFor(address uint16) int {
 	return 1
 }
 
-// encodeLittleEndian encode une valeur entiere sur exactement length octets.
+// encodeLittleEndian encodes an integer into exactly length bytes.
 //
-// Le debordement est une erreur, jamais une troncature silencieuse : ecrire
-// 480 dans un octet donnerait 224, soit une consigne d'eau chaude absurde sur
-// une chaudiere en service.
+// Overflow is an error, never a silent truncation: writing 480 into one byte
+// would yield 224 — an absurd hot water setpoint on a boiler in service.
 func encodeLittleEndian(value int, length int) ([]byte, error) {
 	if length <= 0 || length > 4 {
 		return nil, fmt.Errorf("unsupported write length %d bytes", length)

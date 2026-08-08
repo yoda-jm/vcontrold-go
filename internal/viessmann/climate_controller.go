@@ -27,9 +27,9 @@ type ClimateCommand struct {
 
 // NewClimateController creates a new climate controller
 func NewClimateController(reader *Reader) *ClimateController {
-	// Un Reader construit directement, sans passer par NewReader, n'a pas de
-	// journal : le premier appel a cc.logger.Info paniquerait alors sur un
-	// pointeur nul. Le pilotage climatique ne vaut pas un arret du daemon.
+	// A Reader built directly, bypassing NewReader, has no logger: the first
+	// cc.logger.Info call would then panic on a nil pointer. Climate control
+	// is not worth taking the daemon down for.
 	logger := LoggerInterface(NewNoOpLogger())
 	if reader != nil && reader.logger != nil {
 		logger = reader.logger
@@ -132,16 +132,16 @@ func (cc *ClimateController) setHotWaterTemperature(temperature float64) error {
 	cc.logger.Info("Setting hot water temperature to %.1f°C using address 0x%04X (%s)",
 		temperature, targetAddress, targetDataPoint.Name)
 
-	// La consigne ECS tient sur UN octet, sans facteur. Le XML communautaire :
+	// The hot water setpoint is ONE byte, with no scaling. The community XML:
 	//
 	//	<command name="setTempWWsoll" protocmd="setaddr">
 	//	  <addr>6300</addr> <len>1</len> <unit>ST</unit>
 	//	</command>
 	//
-	// et l'unite ST vaut <calc get="V" set="V"/>. Multiplier par 10 donnerait
-	// 480 pour 48 degres, ce qui ne tient pas dans un octet. C'est l'objet du
-	// correctif amont de fevrier 2023, « setTempWWsoll's length is reportedly
-	// actually 1 ».
+	// and unit ST is <calc get="V" set="V"/>. Multiplying by 10 would give 480
+	// for 48 degrees, which does not fit in a byte. This is the subject of the
+	// February 2023 upstream fix, "setTempWWsoll's length is reportedly
+	// actually 1".
 	writeData := []byte{byte(int(temperature + 0.5))}
 
 	// Write the temperature setpoint
@@ -199,12 +199,10 @@ func (cc *ClimateController) setHeatingTemperature(temperature float64) error {
 	cc.logger.Info("Setting heating temperature to %.1f°C using address 0x%04X (%s)",
 		temperature, targetAddress, targetDataPoint.Name)
 
-	// Convert temperature (similar format as hot water)
-	tempValue := int(temperature * 10)
-	writeData := []byte{
-		byte(tempValue & 0xFF),
-		byte((tempValue >> 8) & 0xFF),
-	}
+	// Same one-byte, unscaled encoding as the hot water setpoint: 0x2306 is
+	// <len>1</len> with unit ST. Writing two scaled bytes would send 220 for
+	// 22 °C and spill the high byte into 0x2307, the reduced setpoint.
+	writeData := []byte{byte(int(temperature + 0.5))}
 
 	err := cc.writeParameter(targetAddress, writeData)
 	if err != nil {

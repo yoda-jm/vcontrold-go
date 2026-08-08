@@ -44,10 +44,9 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 		s.mqttPublisher = mqtt.NewPublisher(nil)
 	}
 
-	// Annoncer les entites a Home Assistant avant la premiere mesure : les
-	// messages de decouverte sont retenus, HA les retrouve donc a chaque
-	// redemarrage, et c'est leur state_class qui declenche l'archivage en
-	// statistiques long terme.
+	// Announce the entities before the first reading: discovery messages are
+	// retained, so Home Assistant finds them again on every restart, and it is
+	// their state_class that triggers long-term statistics.
 	if err := s.mqttPublisher.PublishDiscovery(); err != nil {
 		log.Printf("MQTT discovery not published: %v", err)
 	}

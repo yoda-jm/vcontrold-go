@@ -42,9 +42,9 @@ func TestParseConfiguration(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			// L'ancienne version passait une chaine brute contenant des "\\n"
-			// litteraux, donc une seule ligne : ce YAML n'a jamais pu etre
-			// valide. Les cles sont celles des balises yaml, pas leurs noms Go.
+			// The previous version passed a raw string containing literal
+			// "\\n", hence a single line: that YAML could never be valid. The
+			// keys are the yaml tags, not the Go field names.
 			name:           "yaml config override",
 			args:           []string{"vcontrold-go", "-yaml-config", "/tmp/test_config.yaml"},
 			setupYAML:      true,
@@ -54,8 +54,8 @@ func TestParseConfiguration(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			// Un fichier absent n'est pas une erreur : LoadYamlConfig rend les
-			// valeurs par defaut. Ce qui doit echouer, c'est un YAML illisible.
+			// A missing file is not an error: LoadYamlConfig returns defaults.
+			// What must fail is unreadable YAML.
 			name:          "malformed yaml config",
 			args:          []string{"vcontrold-go", "-yaml-config", "/tmp/test_config.yaml"},
 			setupYAML:     true,
@@ -200,10 +200,9 @@ func TestInitializeReader(t *testing.T) {
 		setupConfig bool
 		setupYAML   bool
 	}{
-		// initializeReader ouvre vraiment le port serie : aucun nom de
-		// peripherique factice ne peut aboutir sans materiel. Ces deux cas
-		// attendaient un succes impossible ; ils verifient desormais que
-		// l'echec est propre et signale.
+		// initializeReader really opens the serial port: no made-up device name
+		// can succeed without hardware. These two cases expected an impossible
+		// success; they now check the failure is clean and reported.
 		{
 			name:        "absent device without config",
 			device:      "mock-device",
@@ -310,9 +309,9 @@ func TestRunApplication(t *testing.T) {
 				createTestConfigFile(t, tt.configFile)
 				defer os.Remove(tt.configFile)
 
-				// runApplication ne charge pas la configuration : sans ce
-				// chargement le lecteur factice n'a aucun point de mesure et
-				// le mode CLI echoue sur "no data points configured".
+				// runApplication does not load the configuration: without this
+				// the mock reader has no data points and CLI mode fails with
+				// "no data points configured".
 				if err := reader.LoadConfig(tt.configFile); err != nil {
 					t.Fatalf("Failed to load test config: %v", err)
 				}
@@ -455,12 +454,12 @@ func createTestXMLFiles(t *testing.T, vcontrolPath, vitoPath string) {
 }
 
 // resetFlags resets the flag package state for testing
-// resetFlags redonne un jeu de drapeaux vierge.
+// resetFlags hands back a clean flag set.
 //
-// parseConfiguration enregistre ses drapeaux sur flag.CommandLine : un second
-// appel dans le meme processus paniquait sur "flag redefined". L'ancienne
-// version ne faisait rien, donc le premier sous-test passait et le suivant
-// faisait tomber tout le paquet.
+// parseConfiguration registers its flags on flag.CommandLine, so a second call
+// in the same process panicked with "flag redefined". The previous version did
+// nothing, so the first subtest passed and the next one took down the whole
+// package.
 func resetFlags() {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	flag.CommandLine.SetOutput(io.Discard)

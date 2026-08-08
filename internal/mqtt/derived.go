@@ -1,9 +1,7 @@
-// Package mqtt - Grandeurs calculees a partir des mesures publiees
+// Package mqtt - values computed from published readings.
 package mqtt
 
 import (
-	"encoding/json"
-	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -11,15 +9,15 @@ import (
 	"github.com/yourusername/vcontrold-go/internal/config"
 )
 
-// derivedState retient la derniere valeur numerique de chaque alias, pour
-// pouvoir recalculer un rapport des qu'un des deux termes change.
+// derivedState remembers the latest numeric value of each alias, so a ratio
+// can be recomputed as soon as either term changes.
 type derivedState struct {
 	mutex  sync.Mutex
 	values map[string]float64
 
-	// Derniere valeur publiee par grandeur derivee : une grandeur calculee
-	// change bien plus rarement que les mesures dont elle depend, et la
-	// republier a chaque lecture noierait le journal sans rien apporter.
+	// Last payload published per derived value. A computed value changes far
+	// less often than the readings behind it, and republishing it on every
+	// read would flood the log without telling anyone anything.
 	published map[string]string
 }
 
@@ -30,19 +28,8 @@ func newDerivedState() *derivedState {
 	}
 }
 
-// changed indique si la valeur differe de la derniere publiee, et la retient.
-func (d *derivedState) changed(alias, payload string) bool {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	if previous, ok := d.published[alias]; ok && previous == payload {
-		return false
-	}
-	d.published[alias] = payload
-	return true
-}
-
-// record memorise une valeur publiee. Les valeurs non numeriques -- les enums
-// comme le mode de fonctionnement -- sont ignorees.
+// record stores a published value. Non-numeric ones — enums such as the
+// operating mode — are ignored.
 func (d *derivedState) record(alias, value string) {
 	f, err := strconv.ParseFloat(value, 64)
 	if err != nil {
@@ -60,8 +47,45 @@ func (d *derivedState) get(alias string) (float64, bool) {
 	return v, ok
 }
 
-// publishDerived recalcule et publie les grandeurs derivees dont les deux
-// termes sont connus.
+// changed reports whether the payload differs from the last published one, and
+// remembers it.
+func (d *derivedState) changed(alias, payload string) bool {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	if previous, ok := d.published[alias]; ok && previous == payload {
+		return false
+	}
+	d.published[alias] = payload
+	return true
+}
+
+// compute evaluates one derived value. It returns false when either term is
+// still unknown, or when the ratio is undefined.
+func computeDerived(d config.MQTTDerivedConfig, state *derivedState) (string, bool) {
+	num, okN := state.get(d.Numerator)
+	den, okD := state.get(d.Denominator)
+	if !okN || !okD {
+		return "", false // One of the two terms has not been read yet.
+	}
+	if den == 0 {
+		return "", false // Undefined ratio: publishing nothing beats publishing zero.
+	}
+
+	factor := d.Factor
+	if factor == 0 {
+		factor = 1
+	}
+
+	precision := d.Precision
+	if precision == 0 {
+		precision = 2
+	}
+
+	return strconv.FormatFloat(num*factor/den, 'f', precision, 64), true
+}
+
+// publishDerived recomputes and publishes the derived values whose terms are
+// both known and whose result has changed.
 func (p *Publisher) publishDerived() {
 	if p.config == nil || len(p.derivedConfigs) == 0 || p.derived == nil {
 		return
@@ -71,33 +95,12 @@ func (p *Publisher) publishDerived() {
 	}
 
 	for _, d := range p.derivedConfigs {
-		num, okN := p.derived.get(d.Numerator)
-		den, okD := p.derived.get(d.Denominator)
-		if !okN || !okD {
-			continue // Un des deux termes n'a pas encore ete lu.
-		}
-		if den == 0 {
-			continue // Rapport indefini : ne rien publier vaut mieux qu'un zero.
-		}
-
-		factor := d.Factor
-		if factor == 0 {
-			factor = 1
-		}
-
-		value := num * factor / den
-		precision := d.Precision
-		if precision == 0 {
-			precision = 2
-		}
-
-		topic := fmt.Sprintf("%s/%s", p.config.TopicRoot, d.Alias)
-		payload := strconv.FormatFloat(value, 'f', precision, 64)
-
-		if !p.derived.changed(d.Alias, payload) {
+		payload, ok := computeDerived(d, p.derived)
+		if !ok || !p.derived.changed(d.Alias, payload) {
 			continue
 		}
 
+		topic := p.stateTopic(d.Alias)
 		if token := p.client.Publish(topic, 0, true, payload); token.Wait() && token.Error() != nil {
 			log.Printf("MQTT derived: failed to publish %s: %v", topic, token.Error())
 			continue
@@ -106,16 +109,19 @@ func (p *Publisher) publishDerived() {
 	}
 }
 
-// PublishDerivedDiscovery annonce les grandeurs derivees a Home Assistant.
+// PublishDerivedDiscovery announces the derived values to Home Assistant.
 func (p *Publisher) PublishDerivedDiscovery(derived []config.MQTTDerivedConfig) error {
-	if !p.enabled || p.config == nil || len(derived) == 0 {
+	if len(derived) == 0 {
 		return nil
 	}
-	if p.client == nil || !p.client.IsConnected() {
-		return fmt.Errorf("cannot publish derived discovery: MQTT client not connected")
+	if err := p.readyToDiscover(); err != nil {
+		if err == errDiscoveryDisabled {
+			return nil
+		}
+		return err
 	}
 
-	// Memoriser la configuration pour le calcul a chaque mesure.
+	// Keep the configuration around for the recomputation on every reading.
 	p.derivedConfigs = derived
 	if p.derived == nil {
 		p.derived = newDerivedState()
@@ -128,45 +134,20 @@ func (p *Publisher) PublishDerivedDiscovery(derived []config.MQTTDerivedConfig) 
 			continue
 		}
 
-		name := d.FriendlyName
-		if name == "" {
-			name = d.Alias
+		displayName := d.FriendlyName
+		if displayName == "" {
+			displayName = d.Alias
 		}
 
-		payload := discoveryPayload{
-			Name:              name,
-			UniqueID:          fmt.Sprintf("%s_%s", deviceIdentifier, objectID),
-			ObjectID:          fmt.Sprintf("vitola_%s", slugify(name)),
-			StateTopic:        fmt.Sprintf("%s/%s", p.config.TopicRoot, d.Alias),
+		payload := sensorPayload{
+			entityBase:        newEntityBase(p, objectID, displayName, d.Icon),
+			StateTopic:        p.stateTopic(d.Alias),
 			UnitOfMeasurement: d.Unit,
 			DeviceClass:       d.DeviceClass,
 			StateClass:        d.StateClass,
-			Icon:              d.Icon,
-			Device: discoveryDevice{
-				Identifiers:  []string{deviceIdentifier},
-				Name:         deviceName,
-				Model:        deviceModel,
-				Manufacturer: deviceVendor,
-			},
-			Availability: []map[string]string{{
-				"topic":                 p.availabilityTopic(),
-				"payload_available":     availabilityOnline,
-				"payload_not_available": availabilityOffline,
-			}},
 		}
 
-		body, err := json.Marshal(payload)
-		if err != nil {
-			log.Printf("MQTT derived: failed to marshal %q: %v", name, err)
-			continue
-		}
-
-		topic := fmt.Sprintf("homeassistant/sensor/%s/%s/config", deviceIdentifier, objectID)
-		if token := p.client.Publish(topic, 0, true, body); token.Wait() && token.Error() != nil {
-			log.Printf("MQTT derived: failed to publish %s: %v", topic, token.Error())
-			continue
-		}
-		log.Printf("MQTT derived discovery: %s (state_class=%q)", topic, d.StateClass)
+		p.publishDiscovery("sensor", objectID, payload)
 	}
 
 	return nil

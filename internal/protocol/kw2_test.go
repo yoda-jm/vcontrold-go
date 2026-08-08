@@ -42,15 +42,15 @@ func TestStatusCodes(t *testing.T) {
 	if KW2_STATUS_SUCCESS != 0x00 {
 		t.Errorf("KW2_STATUS_SUCCESS should be 0x00, got 0x%02X", KW2_STATUS_SUCCESS)
 	}
-	
+
 	if KW2_STATUS_COMM_ERROR != 0xFF {
 		t.Errorf("KW2_STATUS_COMM_ERROR should be 0xFF, got 0x%02X", KW2_STATUS_COMM_ERROR)
 	}
-	
+
 	if KW2_STATUS_INVALID_ADDR != 0xFE {
 		t.Errorf("KW2_STATUS_INVALID_ADDR should be 0xFE, got 0x%02X", KW2_STATUS_INVALID_ADDR)
 	}
-	
+
 	if KW2_STATUS_TIMEOUT != 0xFD {
 		t.Errorf("KW2_STATUS_TIMEOUT should be 0xFD, got 0x%02X", KW2_STATUS_TIMEOUT)
 	}

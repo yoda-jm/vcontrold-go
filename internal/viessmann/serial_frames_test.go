@@ -8,10 +8,9 @@ import (
 	"go.bug.st/serial"
 )
 
-// fakePort est un port serie en memoire : il enregistre ce qui est ecrit et
-// rejoue une reponse programmee. Il permet de verifier les trames octet par
-// octet contre les macros du XML communautaire, ce qu'aucun test de bout en
-// bout ne fait.
+// fakePort is an in-memory serial port: it records what is written and replays
+// a scripted response. It lets the frames be checked byte by byte against the
+// community XML macros, which no end-to-end test does.
 type fakePort struct {
 	written    bytes.Buffer
 	toRead     []byte
@@ -24,7 +23,7 @@ func (f *fakePort) Write(p []byte) (int, error) { return f.written.Write(p) }
 
 func (f *fakePort) Read(p []byte) (int, error) {
 	if f.readPos >= len(f.toRead) {
-		return 0, nil // Timeout : ni octet ni erreur, comme le vrai pilote.
+		return 0, nil // Timeout: neither byte nor error, like the real driver.
 	}
 	n := copy(p, f.toRead[f.readPos:])
 	f.readPos += n
@@ -49,12 +48,12 @@ func (f *fakePort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 func (f *fakePort) Break(time.Duration) error { return nil }
 func (f *fakePort) Close() error              { return nil }
 
-// La trame de lecture doit reproduire SYNC;GETADDR $addr $hexlen :
+// The read frame must reproduce SYNC;GETADDR $addr $hexlen:
 //
-//	SEND 04 ; WAIT 05 ; SEND 01 F7 <adr_hi> <adr_lo> <len>
+//	SEND 04 ; WAIT 05 ; SEND 01 F7 <addr_hi> <addr_lo> <len>
 func TestReadFromDevice_FrameMatchesGETADDR(t *testing.T) {
 	port := &fakePort{
-		// 05 acquitte le SYNC, puis les 4 octets du compteur.
+		// 05 acknowledges the SYNC, then the counter's 4 bytes.
 		toRead: []byte{0x05, 0x92, 0xE2, 0x5F, 0x02},
 	}
 	sc := &SerialCommunicator{port: port, device: "fake"}
@@ -67,8 +66,8 @@ func TestReadFromDevice_FrameMatchesGETADDR(t *testing.T) {
 	wantFrame := []byte{
 		0x04,       // SYNC
 		0x01, 0xF7, // GETADDR
-		0x08, 0xA7, // adresse
-		0x04, // longueur
+		0x08, 0xA7, // address
+		0x04, // length
 	}
 	if got := port.written.Bytes(); !bytes.Equal(got, wantFrame) {
 		t.Errorf("read frame = % X, want % X", got, wantFrame)
@@ -80,16 +79,16 @@ func TestReadFromDevice_FrameMatchesGETADDR(t *testing.T) {
 	}
 }
 
-// La trame d'ecriture doit reproduire SYNC;SETADDR $addr $hexlen;SEND BYTES :
+// The write frame must reproduce SYNC;SETADDR $addr $hexlen;SEND BYTES:
 //
-//	SEND 04 ; WAIT 05 ; SEND 01 F4 <adr_hi> <adr_lo> <len> <donnees>
+//	SEND 04 ; WAIT 05 ; SEND 01 F4 <addr_hi> <addr_lo> <len> <data>
 //
-// Trois regressions sont verrouillees ici : l'opcode 0xF4 (et non 0x01),
-// l'absence totale de checksum (c'est du P300, pas du KW), et le statut
-// attendu 0x00 (RECV 1 SR) plutot que l'acquittement 0x05.
+// Three regressions are locked down here: opcode 0xF4 (not 0x01), the complete
+// absence of a checksum (that belongs to P300, not KW), and the expected 0x00
+// status (RECV 1 SR) rather than the 0x05 acknowledgement.
 func TestWriteToDevice_FrameMatchesSETADDR(t *testing.T) {
 	port := &fakePort{
-		toRead: []byte{0x05, 0x00}, // ACK du SYNC, puis statut OK
+		toRead: []byte{0x05, 0x00}, // SYNC ack, then OK status
 	}
 	sc := &SerialCommunicator{port: port, device: "fake"}
 
@@ -100,9 +99,9 @@ func TestWriteToDevice_FrameMatchesSETADDR(t *testing.T) {
 	wantFrame := []byte{
 		0x04,       // SYNC
 		0x01, 0xF4, // SETADDR
-		0x63, 0x00, // adresse
-		0x01, // longueur : setTempWWsoll fait 1 octet, unite ST
-		0x30, // donnee : 48 degres, sans facteur
+		0x63, 0x00, // address
+		0x01, // length: setTempWWsoll is 1 byte, unit ST
+		0x30, // data: 48 degrees, unscaled
 	}
 	got := port.written.Bytes()
 	if !bytes.Equal(got, wantFrame) {
@@ -114,11 +113,11 @@ func TestWriteToDevice_FrameMatchesSETADDR(t *testing.T) {
 	}
 }
 
-// Un statut non nul doit remonter une erreur : l'unite SR dit 00 = OK,
-// 05 = SYNC (NOT OK). L'ancien code acceptait justement 05.
+// A non-zero status must surface as an error: unit SR says 00 = OK,
+// 05 = SYNC (NOT OK). The old code accepted precisely 05.
 func TestWriteToDevice_RejectsNonZeroStatus(t *testing.T) {
 	port := &fakePort{
-		toRead: []byte{0x05, 0x05}, // ACK du SYNC, puis SYNC (NOT OK)
+		toRead: []byte{0x05, 0x05}, // SYNC ack, then SYNC (NOT OK)
 	}
 	sc := &SerialCommunicator{port: port, device: "fake"}
 
@@ -137,10 +136,10 @@ func TestWriteToDevice_RejectsEmptyPayload(t *testing.T) {
 	}
 }
 
-// Une chaudiere muette ne doit pas figer le daemon : port.Read rend 0 sans
-// erreur, et readNBytes tenait le mutex indefiniment.
+// A silent boiler must not freeze the daemon: port.Read returns 0 without an
+// error, and readNBytes used to hold the mutex forever.
 func TestReadNBytes_TimesOutInsteadOfSpinning(t *testing.T) {
-	port := &fakePort{toRead: nil} // ne repond jamais
+	port := &fakePort{toRead: nil} // never answers
 	sc := &SerialCommunicator{port: port, device: "fake"}
 
 	done := make(chan error, 1)

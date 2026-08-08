@@ -361,13 +361,12 @@ func createTestReader(t *testing.T) *Reader {
 	return NewReaderWithDependencies(config)
 }
 
-// createTestConfigFile ecrit reellement un fichier de configuration.
+// createTestConfigFile actually writes a configuration file.
 //
-// L'ancienne version deleguait a un writeTestFile qui ne faisait rien et
-// rendait nil : le cas "valid config file" ne pouvait donc jamais passer, le
-// fichier n'existant pas. Le format attendu par parseSimpleConfigLine est
-// separe par des espaces -- nom, adresse, taille, type -- et non par des
-// virgules.
+// The previous version delegated to a writeTestFile that did nothing and
+// returned nil, so the "valid config file" case could never pass — the file
+// did not exist. parseSimpleConfigLine expects whitespace-separated fields:
+// name, address, size, type — not commas.
 func createTestConfigFile(t *testing.T, filePath string) {
 	t.Helper()
 

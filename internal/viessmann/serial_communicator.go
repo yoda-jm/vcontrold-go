@@ -18,20 +18,19 @@ type SerialCommunicator struct {
 	mutex  sync.Mutex
 	device string
 
-	// lastTransaction date la fin de la derniere transaction, pour imposer un
-	// repos avant la suivante. Protege par mutex.
+	// lastTransaction records when the last transaction ended, so a rest can
+	// be enforced before the next one. Guarded by mutex.
 	lastTransaction time.Time
 }
 
-// settle attend que la regulation soit prete a reprendre une sequence SYNC.
+// settle waits until the controller is ready for another SYNC sequence.
 //
-// Le mutex rend chaque transaction atomique, mais pas espacee : plusieurs
-// groupes de rafraichissement tournent en parallele et se relaient sur le port
-// sans repos. La regulation perd alors la synchronisation et cesse d'emettre
-// son 05, ce qui fait echouer la transaction suivante -- systematiquement la
-// meme, celle du groupe qui arrive en second.
+// The mutex makes each transaction atomic, but not spaced out: several refresh
+// groups run in parallel and hand the port back and forth with no rest. The
+// controller then loses sync and stops emitting its 05, which fails the next
+// transaction — always the same one, whichever group arrives second.
 //
-// A appeler mutex tenu.
+// Call with the mutex held.
 func (sc *SerialCommunicator) settle() {
 	if sc.lastTransaction.IsZero() {
 		return
@@ -156,7 +155,7 @@ func (sc *SerialCommunicator) sendResetAndWaitForAck() error {
 
 // sendReadCommandAndGetResponse sends KW2 read command and returns the response data
 func (sc *SerialCommunicator) sendReadCommandAndGetResponse(address uint16, size int) ([]byte, error) {
-	// Macro GETADDR : SEND 01 F7, puis $addr $hexlen.
+	// GETADDR macro: SEND 01 F7, then $addr $hexlen.
 	command := []byte{
 		protocol.KW2_START_BYTE,
 		protocol.KW2_CMD_READ,
@@ -193,15 +192,15 @@ func (sc *SerialCommunicator) writeBytes(bytes []byte) error {
 
 // readNBytes reads exactly n bytes from the serial port.
 //
-// Deux garde-fous, car une chaudiere muette ne produit ni octet ni erreur :
-// port.Read rend alors 0 sans erreur. Sans bornes, la boucle tourne
-// indefiniment en tenant le mutex du communicateur, et tout le daemon se fige.
+// A silent boiler yields neither a byte nor an error: port.Read simply returns
+// 0. Unbounded, the loop would spin forever holding the communicator's mutex,
+// and the whole daemon would freeze.
 func (sc *SerialCommunicator) readNBytes(n uint64) ([]byte, error) {
 	response := make([]byte, n)
 	var offset uint64
 
-	// Sans timeout applique, Read bloque sans fin : c'est une erreur, pas un
-	// cas a ignorer silencieusement.
+	// With no timeout applied, Read blocks forever. That is an error, not
+	// something to swallow quietly.
 	setter, ok := sc.port.(interface{ SetReadTimeout(time.Duration) error })
 	if !ok {
 		return nil, errors.New(errors.ErrCommunication,
@@ -211,11 +210,10 @@ func (sc *SerialCommunicator) readNBytes(n uint64) ([]byte, error) {
 		return nil, errors.Wrap(errors.ErrCommunication, "failed to set read timeout", err)
 	}
 
-	// Une echeance, et elle seule. Compter les lectures vides serait plus
-	// severe qu'il n'y parait : la regulation n'emet son 05 de synchronisation
-	// que par intermittence, et deux ou trois lectures vides d'affilee sont
-	// normales avant qu'elle ne reponde. C'est la duree totale qui doit borner,
-	// pas le nombre de tentatives.
+	// A deadline, and nothing else. Counting empty reads is harsher than it
+	// looks: the controller emits its sync byte only intermittently, and two
+	// or three empty reads in a row are normal before it answers. The bound
+	// belongs on elapsed time, not on the number of attempts.
 	deadline := time.Now().Add(protocol.KW2_READ_DEADLINE_MS * time.Millisecond)
 
 	for offset < n {
@@ -257,15 +255,15 @@ func (sc *SerialCommunicator) GetDevice() string {
 
 // sendWriteCommand sends a KW2 protocol write command.
 //
-// Trame conforme a la commande setaddr du XML communautaire :
+// The frame follows the setaddr command of the community XML:
 //
 //	<command name="setaddr">
 //	  <send>SYNC;SETADDR $addr $hexlen;SEND BYTES $unit;RECV 1 SR</send>
 //	</command>
 //
-// soit : 01 F4 <adr_hi> <adr_lo> <len> <donnees...>, puis un octet de statut.
-// Le KW ne porte AUCUN checksum -- c'est une particularite du P300. La reponse
-// est un SetReturnStatus (unite SR) : 00 = OK, 05 = SYNC (NOT OK).
+// that is: 01 F4 <addr_hi> <addr_lo> <len> <data...>, then one status byte.
+// KW carries NO checksum — that belongs to P300. The reply is a
+// SetReturnStatus (unit SR): 00 = OK, 05 = SYNC (NOT OK).
 func (sc *SerialCommunicator) sendWriteCommand(address uint16, data []byte) error {
 	dataLength := len(data)
 	if dataLength == 0 {
@@ -278,9 +276,9 @@ func (sc *SerialCommunicator) sendWriteCommand(address uint16, data []byte) erro
 
 	command := []byte{
 		protocol.KW2_START_BYTE,     // 01
-		protocol.KW2_CMD_WRITE,      // F4 -- macro SETADDR
-		byte((address >> 8) & 0xFF), // adresse, octet de poids fort
-		byte(address & 0xFF),        // adresse, octet de poids faible
+		protocol.KW2_CMD_WRITE,      // F4 — SETADDR macro
+		byte((address >> 8) & 0xFF), // address, high byte
+		byte(address & 0xFF),        // address, low byte
 		byte(dataLength),            // $hexlen
 	}
 	command = append(command, data...) // SEND BYTES

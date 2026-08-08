@@ -1,29 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Surcharges d'adresses propres a CETTE machine :
-  Viessmann Vitola 200 VB2A / regulation Vitotronic 200 KW2.
+  Address overrides specific to THIS machine:
+  Viessmann Vitola 200 VB2A / Vitotronic 200 KW2 controller.
 
-  vito.xml decrit une famille d'appareils, pas un exemplaire. Ce fichier
-  applique par-dessus, sans jamais le modifier : `make deps` peut remonter les
-  XML communautaires sans rien perdre de ce qui est constate ici.
+  vito.xml describes a family of appliances, not one specimen. This file is
+  applied on top of it and never modifies it, so `make deps` can refresh the
+  community XML without losing what was measured here.
 
-  Grammaire identique a vito.xml. Seuls les champs presents sont surcharges.
-  Toute entree doit citer la mesure qui la justifie : pas de valeur devinee.
+  Same grammar as vito.xml. Only the fields present are overridden. Every entry
+  must cite the measurement that justifies it: no guessed values.
 -->
 <vito>
   <commands>
 
     <!--
-      Constate le 8 aout 2026 par lecture directe sur la chaudiere.
+      Observed on 2026-08-08 by reading the boiler directly.
 
-      vito.xml declare <len>2</len>. Sur 2 octets on lit 9707, sur 4 octets
-      206315 (brut EB 25 03 00). Les deux octets de poids fort valent 03 00 :
-      le compteur a donc deja depasse trois fois 65536, et la lecture courte
-      n'en montrait que le mot de poids faible.
+      vito.xml declares <len>2</len>. Read as 2 bytes the value is 9707; read
+      as 4 bytes it is 206315 (raw EB 25 03 00). The two high bytes are 03 00,
+      so the counter has already passed 65536 three times and the short read
+      was showing only its low word.
 
-      Coherence : le releve du 7 octobre 2025 donnait 196980. L'ecart de 9335
-      demarrages sur dix mois, soit ~31 par jour, est plausible pour cette
-      installation. Lu sur 2 octets, l'ecart aurait ete negatif.
+      Consistency: the reading of 2025-10-07 was 196980. A gap of 9335 starts
+      over ten months, about 31 a day, is plausible for this installation.
+      Read as 2 bytes the gap would have been negative.
     -->
     <command name="getBrennerStarts" protocmd="getaddr">
       <addr>088A</addr>

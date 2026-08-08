@@ -9,19 +9,19 @@ import (
 var (
 	// ErrConfig represents configuration-related errors
 	ErrConfig = &ErrorType{Code: "CONFIG_ERROR", Description: "Configuration error"}
-	
+
 	// ErrCommunication represents serial communication errors
 	ErrCommunication = &ErrorType{Code: "COMM_ERROR", Description: "Communication error"}
-	
+
 	// ErrProtocol represents KW2 protocol errors
 	ErrProtocol = &ErrorType{Code: "PROTOCOL_ERROR", Description: "Protocol error"}
-	
+
 	// ErrValidation represents input validation errors
 	ErrValidation = &ErrorType{Code: "VALIDATION_ERROR", Description: "Validation error"}
-	
+
 	// ErrParsing represents data parsing errors
 	ErrParsing = &ErrorType{Code: "PARSING_ERROR", Description: "Parsing error"}
-	
+
 	// ErrNotFound represents resource not found errors
 	ErrNotFound = &ErrorType{Code: "NOT_FOUND", Description: "Resource not found"}
 )

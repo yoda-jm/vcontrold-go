@@ -4,7 +4,7 @@ package protocol
 
 // KW2 Protocol Commands
 //
-// Ces valeurs proviennent du bloc <protocol name="KW2"> de vcontrold.xml :
+// These values come from the <protocol name="KW2"> block of vcontrold.xml:
 //
 //	<macro name="SYNC">    <command>SEND 04;WAIT 05</command></macro>
 //	<macro name="GETADDR"> <command>SEND 01 F7</command></macro>
@@ -13,18 +13,18 @@ const (
 	// Reset command sent to initialize the protocol connection (macro SYNC)
 	KW2_RESET_CMD = 0x04
 
-	// Expected acknowledgment response after reset (macro SYNC : WAIT 05)
+	// Expected acknowledgment response after reset (macro SYNC: WAIT 05)
 	KW2_ACK_RESPONSE = 0x05
 
 	// Start byte for KW2 protocol messages
 	KW2_START_BYTE = 0x01
 
-	// Opcode de lecture, second octet de la macro GETADDR (SEND 01 F7).
-	// Anciennement nomme KW2_CHECKSUM_INIT : ce n'a jamais ete un checksum,
-	// et cette confusion est a l'origine du chemin d'ecriture defectueux.
+	// Read opcode, the second byte of the GETADDR macro (SEND 01 F7).
+	// Formerly named KW2_CHECKSUM_INIT: it was never a checksum, and that
+	// confusion is what produced the broken write path.
 	KW2_CMD_READ = 0xF7
 
-	// Opcode d'ecriture, second octet de la macro SETADDR (SEND 01 F4).
+	// Write opcode, the second byte of the SETADDR macro (SEND 01 F4).
 	KW2_CMD_WRITE = 0xF4
 )
 
@@ -32,13 +32,13 @@ const (
 const (
 	// Default baud rate for V200KW2 communication
 	KW2_DEFAULT_BAUDRATE = 4800
-	
+
 	// Data bits setting
 	KW2_DATA_BITS = 8
-	
-	// Stop bits setting  
+
+	// Stop bits setting
 	KW2_STOP_BITS = 2
-	
+
 	// Parity setting (Even parity required)
 	KW2_PARITY_EVEN = true
 )
@@ -47,29 +47,29 @@ const (
 const (
 	// Default read timeout in milliseconds
 	KW2_READ_TIMEOUT_MS = 500
-	
+
 	// Delay between retry attempts in milliseconds
 	KW2_RETRY_DELAY_MS = 200
-	
+
 	// Delay between consecutive reads in milliseconds
 	KW2_READ_DELAY_MS = 100
-	
+
 	// Maximum number of retry attempts for failed operations
 	KW2_MAX_RETRIES = 3
 
-	// Echeance globale d'une lecture de trame, toutes tentatives comprises.
-	// Sans elle, un port qui ne repond jamais fige le daemon : readNBytes
-	// boucle en tenant le mutex du communicateur serie.
+	// Overall deadline for reading one frame, retries included. Without it a
+	// silent port freezes the daemon: readNBytes spins while holding the
+	// serial communicator's mutex.
 	//
-	// Large a dessein. La regulation n'emet son 05 de synchronisation que par
-	// intermittence : une borne trop courte fait echouer les lectures alors que
-	// la liaison est saine. A 4800 bauds, 8N2, meme huit octets ne prennent que
-	// ~19 ms -- ce delai ne borne donc pas la transmission, mais l'attente.
+	// Deliberately generous. The controller only emits its 05 sync byte
+	// intermittently, so too tight a bound fails reads on a healthy link. At
+	// 4800 baud, 8N2, even eight bytes take ~19 ms — this bounds the wait,
+	// not the transmission.
 	KW2_READ_DEADLINE_MS = 5000
 
-	// Repos impose entre deux transactions completes. Enchainer immediatement
-	// une nouvelle sequence SYNC alors que la precedente vient de s'achever
-	// desynchronise la regulation.
+	// Enforced rest between two complete transactions. Starting a new SYNC
+	// sequence the instant the previous one ends desynchronises the
+	// controller.
 	KW2_SETTLE_DELAY_MS = 100
 )
 
@@ -77,10 +77,10 @@ const (
 const (
 	// Maximum expected data size for a single parameter read
 	KW2_MAX_DATA_SIZE = 8
-	
+
 	// Expected size for BCD date/time data
 	KW2_DATETIME_SIZE = 8
-	
+
 	// Standard temperature data size in bytes
 	KW2_TEMP_DATA_SIZE = 2
 )
@@ -89,13 +89,13 @@ const (
 const (
 	// Successful operation
 	KW2_STATUS_SUCCESS = 0x00
-	
+
 	// Communication error
 	KW2_STATUS_COMM_ERROR = 0xFF
-	
+
 	// Invalid address error
 	KW2_STATUS_INVALID_ADDR = 0xFE
-	
+
 	// Timeout error
 	KW2_STATUS_TIMEOUT = 0xFD
 )

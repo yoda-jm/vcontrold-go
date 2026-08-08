@@ -1,34 +1,34 @@
-// Package viessmann - Detection des valeurs « pas de donnee »
+// Package viessmann - detection of "no data" markers.
 package viessmann
 
-// La regulation ne signale pas l'absence d'un capteur ou d'un circuit par une
-// erreur : elle rend une valeur reservee. Publiee telle quelle, elle devient
-// une mesure absurde -- 3276,7 °C pour un capteur solaire inexistant, 6553,5 °C
-// pour la consigne de depart d'un circuit melangeur absent.
+// The controller does not report a missing sensor or circuit as an error: it
+// returns a reserved value. Published as-is it becomes an absurd measurement —
+// 3276.7 °C for a solar sensor that does not exist, 6553.5 °C for the flow
+// setpoint of an absent mixing circuit.
 //
-// Les deux motifs sont documentes par le profil de reference du V200KW2
-// (doc/examples/sim-2098.ini) : les points que l'appareil ne porte pas y
-// figurent avec ces valeurs exactes.
+// Both patterns are documented by the V200KW2 reference profile
+// (doc/examples/sim-2098.ini): the datapoints this appliance does not carry
+// appear there with exactly these values.
 //
-//	FF / FF FF    donnee absente         (getTempVLsoll*, getMischer*)
-//	FF 7F         capteur non raccorde   (0x7FFF, temperatures signees)
+//	FF / FF FF    datapoint absent      (getTempVLsoll*, getMischer*)
+//	FF 7F         sensor not connected  (0x7FFF, signed temperatures)
 //
-// Distinct du mecanisme <error> de vito.xml, qui decrit une erreur propre a une
-// adresse ; ces motifs-ci valent pour tout l'appareil.
+// Distinct from the <error> mechanism of vito.xml, which describes an error
+// specific to one address; these patterns hold for the whole appliance.
 
-// unavailableInt16 est la valeur reservee des temperatures signees sur deux
-// octets : 0x7FFF, soit le maximum d'un int16. Aucune temperature reelle ne
-// l'atteint -- elle vaudrait 3276,7 °C apres division par dix.
+// unavailableInt16 is the reserved value for two-byte signed temperatures:
+// 0x7FFF, the maximum of an int16. No real temperature reaches it — divided by
+// ten it would read 3276.7 °C.
 const unavailableInt16 = 0x7FFF
 
-// IsUnavailableValue indique si des octets bruts signifient « pas de donnee »
-// plutot qu'une mesure.
+// IsUnavailableValue reports whether raw bytes mean "no data" rather than a
+// measurement.
 func IsUnavailableValue(data []byte) bool {
 	if len(data) == 0 {
 		return false
 	}
 
-	// Tous les octets a FF : le point de mesure n'existe pas sur cet appareil.
+	// All bytes FF: this datapoint does not exist on this appliance.
 	allFF := true
 	for _, b := range data {
 		if b != 0xFF {
@@ -40,9 +40,9 @@ func IsUnavailableValue(data []byte) bool {
 		return true
 	}
 
-	// 0x7FFF en petit-boutiste sur une grandeur de deux octets : capteur
-	// absent. Limite a deux octets, car sur quatre octets cette combinaison
-	// est une valeur de compteur parfaitement plausible.
+	// 0x7FFF little-endian on a two-byte value: sensor absent. Restricted to
+	// two bytes, because across four bytes that same combination is a
+	// perfectly plausible counter reading.
 	if len(data) == 2 {
 		value := uint16(data[0]) | uint16(data[1])<<8
 		if value == unavailableInt16 {

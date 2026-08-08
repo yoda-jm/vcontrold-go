@@ -10,15 +10,16 @@ import (
 	"github.com/yourusername/vcontrold-go/internal/xml"
 )
 
-// verifyWrite exerce le chemin d'ecriture sans rien changer sur la chaudiere.
+// verifyWrite exercises the write path without changing anything on the
+// boiler.
 //
-// C'est le protocole de CLAUDE.md, « Prudence sur l'ecriture » : lire la
-// valeur, la reecrire a l'identique, verifier le retour 00, relire.
+// The protocol is: read the value, write it back unchanged, check the 00
+// status, read again.
 //
-// Les octets relus sont reecrits tels quels, sans repasser par une valeur
-// numerique : aucune conversion ne peut donc introduire d'ecart, et l'ecriture
-// est un no-op par construction. Elle prouve malgre tout que la trame SETADDR
-// est acceptee -- ce qu'aucun test unitaire ne peut etablir.
+// The bytes read back are rewritten as-is, never round-tripped through a
+// numeric value, so no conversion can introduce a discrepancy and the write is
+// a no-op by construction. It still proves the SETADDR frame is accepted —
+// something no unit test can establish.
 func verifyWrite(reader *viessmann.Reader, addressStr string) error {
 	address, err := config.ParseHexAddress(addressStr)
 	if err != nil {
@@ -37,36 +38,36 @@ func verifyWrite(reader *viessmann.Reader, addressStr string) error {
 		return errors.New(errors.ErrCommunication, "this serial communicator does not support writing")
 	}
 
-	fmt.Printf("Adresse 0x%04X (%s), %d octet(s), unite %s\n",
+	fmt.Printf("Address 0x%04X (%s), %d byte(s), unit %s\n",
 		address, mapping.Description, mapping.Length, mapping.Unit)
 
-	// 1. Lire la valeur courante.
+	// 1. Read the current value.
 	before, err := comm.ReadFromDevice(address, mapping.Length)
 	if err != nil {
 		return errors.Wrap(errors.ErrCommunication, "step 1: failed to read the current value", err)
 	}
-	fmt.Printf("  1. lecture initiale    : % X\n", before)
+	fmt.Printf("  1. initial read      : % X\n", before)
 
-	// 2. La reecrire a l'identique. WriteToDevice echoue si le statut n'est
-	//    pas 00, ce qui couvre l'etape 3 du protocole.
+	// 2. Write it back unchanged. WriteToDevice fails unless the status is 00,
+	//    which covers step 3 of the protocol.
 	if err := writer.WriteToDevice(address, before); err != nil {
 		return errors.Wrap(errors.ErrCommunication, "steps 2-3: the write was refused", err)
 	}
-	fmt.Printf("  2. reecriture a l'identique : % X\n", before)
-	fmt.Printf("  3. statut                   : 00 (OK)\n")
+	fmt.Printf("  2. write back unchanged: % X\n", before)
+	fmt.Printf("  3. status              : 00 (OK)\n")
 
-	// 4. Relire et comparer.
+	// 4. Read back and compare.
 	after, err := comm.ReadFromDevice(address, mapping.Length)
 	if err != nil {
 		return errors.Wrap(errors.ErrCommunication, "step 4: failed to read back", err)
 	}
-	fmt.Printf("  4. relecture           : % X\n", after)
+	fmt.Printf("  4. read back         : % X\n", after)
 
 	if !bytes.Equal(before, after) {
 		return errors.New(errors.ErrProtocol, fmt.Sprintf(
 			"read-back mismatch: wrote % X but read % X -- the write path altered the value", before, after))
 	}
 
-	fmt.Printf("\nChemin d'ecriture valide : la trame SETADDR est acceptee et la valeur est inchangee.\n")
+	fmt.Printf("\nWrite path verified: the SETADDR frame is accepted and the value is unchanged.\n")
 	return nil
 }

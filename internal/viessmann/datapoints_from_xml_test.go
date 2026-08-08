@@ -9,8 +9,8 @@ import (
 	"github.com/yourusername/vcontrold-go/internal/xml"
 )
 
-// vitoXMLPath renvoie le vito.xml communautaire recupere par `make deps`.
-// Les tests qui en dependent sont ignores si le bootstrap n'a pas ete lance.
+// vitoXMLPath returns the community vito.xml fetched by `make deps`. Tests
+// depending on it are skipped when the bootstrap has not been run.
 func vitoXMLPath(t *testing.T) string {
 	t.Helper()
 	path, err := filepath.Abs("../../third_party/vcontrold/xml/kw/vito.xml")
@@ -43,9 +43,8 @@ func TestDataTypeForSize(t *testing.T) {
 	}
 }
 
-// Les longueurs viennent de vito.xml : c'est tout l'interet de ne plus les
-// deviner. getBrennerStunden1 fait 4 octets, une valeur devinee a 2 tronquerait
-// le compteur.
+// Lengths come from vito.xml, which is the whole point of no longer guessing:
+// getBrennerStunden1 is 4 bytes, and a guessed 2 would truncate the counter.
 func TestBuildDataPointsFromXML_UsesXMLLength(t *testing.T) {
 	vitoXMLPath(t)
 
@@ -86,8 +85,8 @@ func TestBuildDataPointsFromXML_UsesXMLLength(t *testing.T) {
 	}
 }
 
-// Une taille explicite l'emporte sur le XML : c'est le mecanisme qui corrige
-// getBrennerStarts, declare sur 2 octets alors que le compteur en fait 4.
+// An explicit size beats the XML: this is the mechanism that corrects
+// getBrennerStarts, declared as 2 bytes while the counter is really 4.
 func TestBuildDataPointsFromXML_ExplicitSizeWins(t *testing.T) {
 	vitoXMLPath(t)
 
@@ -106,8 +105,8 @@ func TestBuildDataPointsFromXML_ExplicitSizeWins(t *testing.T) {
 	}
 }
 
-// Une adresse inconnue du XML et sans taille explicite doit echouer bruyamment :
-// deviner reviendrait a publier une valeur fausse sans le dire.
+// An address unknown to the XML and without an explicit size must fail loudly:
+// guessing would publish a wrong value without saying so.
 func TestBuildDataPointsFromXML_UnknownAddressIsAnError(t *testing.T) {
 	vitoXMLPath(t)
 
@@ -117,8 +116,8 @@ func TestBuildDataPointsFromXML_UnknownAddressIsAnError(t *testing.T) {
 	}
 }
 
-// Une meme adresse citee dans un groupe de rafraichissement et dans la liste
-// MQTT ne doit produire qu'un seul point de mesure, en gardant la taille forcee.
+// The same address named in both a refresh group and the MQTT list must yield
+// a single data point, keeping the forced size.
 func TestBuildDataPointsFromXML_Deduplicates(t *testing.T) {
 	vitoXMLPath(t)
 
@@ -179,8 +178,8 @@ func TestAddressSpecsFromYaml_RejectsInvalidHex(t *testing.T) {
 	}
 }
 
-// Deplace depuis cmd/vcontrold-go/main_test.go : deduplicateDataPoints n'est
-// pas exportee, le banc ne pouvait donc pas compiler depuis le paquet main.
+// Moved from cmd/vcontrold-go/main_test.go: deduplicateDataPoints is not
+// exported, so the benchmark could not compile from package main.
 func BenchmarkDeduplicateDataPoints(b *testing.B) {
 	reader := &Reader{logger: &MockLogger{}}
 

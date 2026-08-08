@@ -1,8 +1,15 @@
-# Copier en config-openv.yaml et adapter. Le fichier reel est gitignore.
-# Les chemins third_party/ sont crees par : make deps
+# Copy to config-openv.yaml and adapt. The real file is gitignored.
+# The third_party/ paths are created by: make deps
 #
-# Toutes les adresses et longueurs viennent de vito.xml ; seule 0x088A est
-# corrigee, par overrides/vitola200-kw2.xml. Rien n'est code en dur ici.
+# All addresses and lengths come from vito.xml; only 0x088A is corrected, via
+# overrides/vitola200-kw2.xml. Nothing is hard-coded here.
+#
+# On naming: the get*/set* identifiers and the German terms in them (soll =
+# setpoint, ist = actual, WW = Warmwasser/hot water, Betriebsart = operating
+# mode) are NOT ours to rename. They are the command names of the community
+# vito.xml, and keeping them is what lets any address here be traced back to
+# the upstream XML and to the openv documentation. Only the friendly_name
+# fields are translated, because those are what Home Assistant displays.
 
 device: /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_XXXX-if00-port0
 
@@ -10,45 +17,45 @@ vcontrol_xml:       third_party/vcontrold/xml/kw/vcontrold.xml
 vito_xml:           third_party/vcontrold/xml/kw/vito.xml
 vito_overrides_xml: overrides/vitola200-kw2.xml
 
-# web: true est OBLIGATOIRE. La publication MQTT est portee par le serveur web ;
-# en mode CLI le daemon lit une fois et sort, sans jamais publier.
+# web: true is MANDATORY. MQTT publishing is carried by the web server; in CLI
+# mode the daemon reads once and exits without ever publishing.
 web: true
 web_port: "8080"
 verbose: false
 
 refresh_groups:
-  # Ce qui bouge : etats et temperatures.
-  - name: Temperatures et etats
+  # What moves: states and temperatures.
+  - name: Temperatures and states
     interval: 60s
     enabled: true
     addresses:
-      - "0x0800"   # temperature exterieure
-      - "0x0802"   # temperature chaudiere
-      - "0x0804"   # temperature ECS
-      - "0x080C"   # temperature de depart (seule sonde de depart presente)
-      - "0x5502"   # consigne chaudiere
-      - "0x551E"   # etat bruleur
-      - "0x2906"   # etat circulateur M1
-      - "0x0845"   # pompe de charge ballon
-      - "0x0846"   # pompe de bouclage
-      - "0x2301"   # mode de fonctionnement
-      - "0x7579"   # defaut collectif
+      - "0x0800"   # outside temperature
+      - "0x0802"   # boiler temperature
+      - "0x0804"   # hot water temperature
+      - "0x080C"   # flow temperature (the only flow probe present)
+      - "0x5502"   # boiler setpoint
+      - "0x551E"   # burner state
+      - "0x2906"   # circulator M1 state
+      - "0x0845"   # cylinder charge pump
+      - "0x0846"   # circulation pump
+      - "0x2301"   # operating mode
+      - "0x7579"   # collective fault
 
-  # Ce qui ne bouge pas vite : compteurs et consigne. Les interroger souvent
-  # n'apporte rien et occupe la liaison optique.
-  - name: Compteurs et consignes
+  # What barely moves: counters and setpoints. Polling them often gains
+  # nothing and ties up the optical link.
+  - name: Counters and setpoints
     interval: 5m
     enabled: true
     addresses:
-      - "0x08A7"   # heures bruleur
-      - "0x088A"   # demarrages bruleur
-      - "0x6300"   # consigne ECS
-      - "0x2306"   # consigne ambiance normale M1
-      - "0x2307"   # consigne ambiance reduite M1
-      - "0x2304"   # niveau courbe de chauffe
-      - "0x2305"   # pente courbe de chauffe
-      - "0x2302"   # mode economie
-      - "0x2303"   # mode reception
+      - "0x08A7"   # burner hours
+      - "0x088A"   # burner starts
+      - "0x6300"   # hot water setpoint
+      - "0x2306"   # normal room setpoint M1
+      - "0x2307"   # reduced room setpoint M1
+      - "0x2304"   # heating curve level
+      - "0x2305"   # heating curve slope
+      - "0x2302"   # eco mode
+      - "0x2303"   # party mode
 
 mqtt:
   enabled: true
@@ -58,11 +65,11 @@ mqtt:
   topic_root: openv
   refresh_threshold: 1h
 
-  # Les alias donnent le nom du topic : openv/<alias>.
-  # device_class / state_class sont deduits de l'unite vito.xml ; ils ne sont
-  # precises ici que la ou le XML ne suffit pas.
+  # The alias gives the topic name: openv/<alias>.
+  # device_class / state_class are derived from the vito.xml unit; they appear
+  # here only where the XML is not enough.
   addresses:
-    # --- Objectif metier : les deux compteurs du bilan energetique -----------
+    # --- The two counters the energy case rests on --------------------------
     - address: "0x08A7"
       alias: getBrennerStunden1
       friendly_name: Heures brûleur
@@ -87,13 +94,13 @@ mqtt:
       device_class: temperature
       state_class: measurement
 
-    # --- Etats ---------------------------------------------------------------
-    # Etats 0/1 : en binary_sensor Home Assistant affiche « Marche / Arret »
-    # au lieu d'un « 0 » nu, et l'historique devient lisible d'un coup d'oeil.
-    # device_class: running, et surtout PAS heat. La classe « heat » sert a
-    # signaler une surchauffe : Home Assistant l'affiche « Chaud / Normal »,
-    # ce qui pour un bruleur ne veut rien dire. « running » donne
-    # « En marche / A l'arret ».
+    # --- States --------------------------------------------------------------
+    # 0/1 states: as binary sensors Home Assistant shows "Running / Not
+    # running" instead of a bare "0", and the history becomes readable at a
+    # glance.
+    # device_class: running, and definitely NOT heat. The "heat" class reports
+    # an overheat condition: Home Assistant renders it "Hot / Normal", which
+    # means nothing for a burner. "running" gives "Running / Not running".
     - address: "0x551E"
       alias: getBrennerStatus
       friendly_name: Brûleur
@@ -109,7 +116,7 @@ mqtt:
       alias: getBetriebArtM1
       friendly_name: Mode de fonctionnement
 
-    # --- Complements ---------------------------------------------------------
+    # --- Additions -----------------------------------------------------------
     - address: "0x080C"
       alias: getTempVList
       friendly_name: Température de départ
@@ -139,7 +146,7 @@ mqtt:
       state_class: measurement
       icon: mdi:arrow-up-down
 
-    # Le defaut collectif : la seule alarme que la regulation expose.
+    # The collective fault: the only alarm the controller exposes.
     - address: "0x7579"
       alias: getStatusStoerung
       friendly_name: Défaut
@@ -166,15 +173,14 @@ mqtt:
       component: binary_sensor
       icon: mdi:party-popper
 
-# Pilotage depuis Home Assistant.
+# Control from Home Assistant.
 #
-# Aucune transformation : setTempWWsoll fait UN octet, unite ST
-# (<calc get="V" set="V"/>). La longueur d'ecriture est lue dans le XML.
-# Le transform multiply_10 d'avant ecrivait 480 pour 48 degres, ce qui ne tient
-# pas dans un octet.
+# No transform: setTempWWsoll is ONE byte, unit ST (<calc get="V" set="V"/>).
+# The write length is read from the XML. The previous multiply_10 transform
+# wrote 480 for 48 degrees, which does not fit in a byte.
 mqtt_hooks:
   - topic: "openv/setTempWWsoll"
-    description: "Consigne eau chaude sanitaire (0x6300, 1 octet, unite ST)"
+    description: "Domestic hot water setpoint (0x6300, 1 byte, unit ST)"
     enabled: true
     action:
       type: "write_address"
@@ -182,12 +188,10 @@ mqtt_hooks:
       min_value: 35.0
       max_value: 60.0
 
-  # setBetriebArtM1 est a 0x2301 d'apres vito.xml -- et non 0x2323, qui etait
-  # configure jusqu'ici et n'a donc jamais rien pilote.
-  # Consigne d'ambiance normale M1 (0x2306, 1 octet, unite ST). C'est la
-  # consigne que porte l'entite climate « Chauffage ».
+  # Normal room setpoint M1 (0x2306, 1 byte, unit ST). This is the setpoint
+  # the heating climate entity carries.
   - topic: "openv/setTempRaumNorSollM1"
-    description: "Consigne ambiance normale M1 (0x2306, 1 octet, unite ST)"
+    description: "Normal room setpoint M1 (0x2306, 1 byte, unit ST)"
     enabled: true
     action:
       type: "write_address"
@@ -195,9 +199,11 @@ mqtt_hooks:
       min_value: 10.0
       max_value: 30.0
 
+  # setBetriebArtM1 is at 0x2301 per vito.xml — not 0x2323, which was
+  # configured until now and therefore never controlled anything.
   - topic: "openv/setBetriebArtM1"
-    description: "Mode de fonctionnement M1 (0x2301, 1 octet, unite BA)"
-    enabled: false        # a n'activer qu'apres un aller-retour verifie
+    description: "Operating mode M1 (0x2301, 1 byte, unit BA)"
+    enabled: false        # enable only after a verified round trip
     action:
       type: "write_address"
       address: "0x2301"
@@ -205,71 +211,69 @@ mqtt_hooks:
       max_value: 5
 
 
-# Entites climate exposees a Home Assistant.
+# Climate entities exposed to Home Assistant.
 #
-# Deux entites, parce que ce sont deux consignes distinctes dans la regulation :
-# l'eau chaude sanitaire (0x6300) et l'ambiance du circuit de chauffage
-# (0x2306). Les regrouper en une seule entite obligerait a mentir sur l'une des
-# deux.
+# Two of them, because the controller holds two distinct setpoints: domestic
+# hot water (0x6300) and the heating circuit's room setpoint (0x2306). Merging
+# them into one entity would mean lying about one of the two.
 #
-# Aucune des deux ne declare de mode : la Vitotronic 200 KW2 n'a qu'un mode
-# GLOBAL (unite BA, adresse 0x2301), commun aux deux usages. L'exposer comme un
-# mode par zone laisserait croire a un pilotage separe que l'appareil ne sait
-# pas faire ; il reste disponible comme capteur « Mode de fonctionnement ».
+# Their mode is read-only: the Vitotronic 200 KW2 has a single GLOBAL mode
+# (unit BA, address 0x2301) shared by both uses. Exposing it as a per-zone mode
+# would suggest separate control the appliance cannot deliver.
 mqtt_climates:
 
-  # La sonde de ballon donne une vraie temperature mesuree : l'entite est donc
-  # un thermostat complet.
+  # The cylinder probe gives a genuine measured temperature, so this is a
+  # complete thermostat.
   - name: Eau chaude sanitaire
     object_id: vitola_ecs
     icon: mdi:water-thermometer
-    target_alias: getTempWWsoll        # -> commande sur openv/setTempWWsoll
+    target_alias: getTempWWsoll        # -> command on openv/setTempWWsoll
     target_address: "0x6300"
     current_alias: getTempWWist
     action_alias: getBrennerStatus
     min_temp: 10
     max_temp: 60
     temp_step: 1
-    # Mode en LECTURE SEULE : pas de mode_address, donc pas de topic de
-    # commande. Le mode est global a la regulation (unite BA) ; le regler
-    # depuis l'eau chaude agirait aussi sur le chauffage.
+    # READ-ONLY mode: no mode_address, hence no command topic. The mode is
+    # global to the controller (unit BA); setting it from hot water would move
+    # the heating too.
     #
-    # L'eau chaude est produite dans tous les modes sauf l'arret total.
+    # Hot water is produced in every mode except the full stop.
     modes: ["off", "heat"]
     mode_alias: getBetriebArtM1
     mode_template: "{{ 'off' if value == 'ABSCHALT' else 'heat' }}"
 
-  # Pas de current_alias : la regulation n'expose AUCUNE sonde d'ambiance.
-  # Presenter la temperature de depart ou celle de la chaudiere comme une
-  # temperature ambiante serait faux -- 54 °C affiches face a une consigne de
-  # 22 °C. Une entite a consigne seule est moins jolie, mais exacte.
+  # No current_alias: the controller exposes NO room sensor. Presenting the
+  # flow or boiler temperature as a room temperature would be false — 54 °C
+  # shown against a 22 °C setpoint. A setpoint-only entity is plainer, but
+  # true.
   - name: Chauffage
     object_id: vitola_chauffage
     icon: mdi:radiator
-    target_alias: getTempRaumNorSollM1  # -> commande sur openv/setTempRaumNorSollM1
+    target_alias: getTempRaumNorSollM1  # -> command on openv/setTempRaumNorSollM1
     target_address: "0x2306"
     action_alias: getBrennerStatus
     min_temp: 10
     max_temp: 30
     temp_step: 1
-    # Le chauffage ne tourne que dans les modes qui le prevoient : en WW
-    # (eau chaude seule, le cas en ete) il est a l'arret, et l'entite le dit.
+    # Heating only runs in the modes that call for it: in WW (hot water only,
+    # the summer case) it is stopped, and the entity says so.
     modes: ["off", "heat"]
     mode_alias: getBetriebArtM1
     mode_template: "{{ 'heat' if value in ['RED', 'NORM', 'H+WW'] else 'off' }}"
 
-# Grandeurs calculees.
+# Computed values.
 #
-# La duree moyenne d'un cycle de bruleur est LE chiffre du dossier energie :
-# 11 066 h de combustion pour 206 315 demarrages donnent ~3,2 min par cycle.
-# C'est la mesure du surdimensionnement de la chaudiere actuelle, et l'argument
-# a opposer a un dimensionnement de PAC calque sur sa puissance.
+# The average burner cycle length is THE number the energy case turns on:
+# 11,066 h of firing for 206,315 starts gives about 3.2 min per cycle. That is
+# the measure of how oversized the current boiler is, and the argument against
+# sizing a heat pump from its output.
 mqtt_derived:
   - alias: cycleMoyen
     friendly_name: Durée moyenne d'un cycle
     numerator_alias: getBrennerStunden1
     denominator_alias: getBrennerStarts
-    factor: 60                 # heures -> minutes
+    factor: 60                 # hours -> minutes
     unit: min
     state_class: measurement
     icon: mdi:timer-sand

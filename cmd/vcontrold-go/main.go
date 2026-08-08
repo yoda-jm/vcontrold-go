@@ -20,8 +20,8 @@ type singleRead struct {
 	address string // hex address, empty when not in single-read mode
 	size    int    // 0 = take the length from vito.xml
 
-	// verifyWrite porte l'adresse a soumettre au protocole de verification
-	// d'ecriture de CLAUDE.md. Vide = pas de verification.
+	// verifyWrite holds the address to submit to the write-verification
+	// protocol. Empty means no verification.
 	verifyWrite string
 }
 
@@ -32,14 +32,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Les XML communautaires manquants degradent le formatage sans empecher de
-	// lire : on se contente d'un avertissement.
+	// Missing community XML degrades formatting without preventing reads, so a
+	// warning is enough.
 	if err := initializeXMLSystems(cfg); err != nil {
 		fmt.Printf("Warning: XML initialization issues: %v\n", err)
 	}
 
-	// Les surcharges, elles, portent des longueurs de lecture. Les ignorer
-	// silencieusement republierait des compteurs tronques : on s'arrete.
+	// Overrides, though, carry read lengths. Ignoring them quietly would
+	// republish truncated counters, so stop instead.
 	if err := xml.LoadAddressMappingOverrides(cfg.VitoOverridesXML); err != nil {
 		log.Fatalf("Failed to apply address overrides: %v", err)
 	}
@@ -106,8 +106,8 @@ func readSingleAddress(reader *viessmann.Reader, addressStr string, cfg *config.
 		name := fmt.Sprintf("Unknown_0x%04X", address)
 		source := "defaults (address absent from vito.xml)"
 
-		// La longueur du XML fait foi : deviner 2 octets tronque les compteurs
-		// 4 octets (getBrennerStunden1) et fausse silencieusement le resultat.
+		// The XML length is authoritative: guessing two bytes truncates
+		// four-byte counters such as getBrennerStunden1.
 		if mapping, exists := xml.GetAddressMapping(uint16(address)); exists {
 			if mapping.Length > 0 {
 				size = mapping.Length
@@ -119,8 +119,8 @@ func readSingleAddress(reader *viessmann.Reader, addressStr string, cfg *config.
 			source = fmt.Sprintf("vito.xml (unit %s)", mapping.Unit)
 		}
 
-		// L'operateur peut forcer la taille pour sonder une adresse dont le XML
-		// ne dit rien, ou dont on soupconne la longueur d'etre fausse.
+		// The operator can force the size to probe an address the XML says
+		// nothing about, or whose declared length looks wrong.
 		if sizeOverride > 0 {
 			size = sizeOverride
 			dataType = viessmann.DataTypeForSize(size)
@@ -259,10 +259,10 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 		return nil, errors.Wrap(errors.ErrCommunication, "failed to create Viessmann reader", err)
 	}
 
-	// Deux sources possibles pour les points de mesure. La liste de datapoints
-	// (DP_Listen) reste acceptee si elle est fournie, mais elle n'existe sur
-	// aucune branche publique amont : par defaut on derive tout de vito.xml,
-	// a partir des adresses que la configuration YAML declare surveiller.
+	// Two possible sources for data points. A DP_Listen datapoint list is still
+	// accepted when supplied, but it exists on no public upstream branch, so by
+	// default everything is derived from vito.xml, using the addresses the YAML
+	// configuration declares.
 	switch {
 	case cfg.ConfigFile != "":
 		if err := reader.LoadConfig(cfg.ConfigFile); err != nil {
@@ -316,7 +316,7 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 
 // runApplication handles the main application logic based on mode
 func runApplication(reader *viessmann.Reader, cfg *config.Config, probe singleRead) error {
-	// Verification du chemin d'ecriture : n'altere aucune valeur.
+	// Write-path verification: alters no value.
 	if probe.verifyWrite != "" {
 		return verifyWrite(reader, probe.verifyWrite)
 	}

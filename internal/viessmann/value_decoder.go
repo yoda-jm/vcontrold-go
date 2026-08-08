@@ -85,15 +85,14 @@ func (vd *ValueDecoder) ParseBCDDateTime(data []byte) string {
 
 // DecodeCycleTime decodes cycle time data into a readable format.
 //
-// Cette fonction ne convertit PAS en heures. La conversion appartient a l'unite
-// du XML : CS porte <calc get="V/3600"/> et l'entite « Stunden ». Le
-// `if raw > 3600 { raw / 3600 }` code en dur ici ouvrait un second chemin pour
-// la meme conversion, donc deux resultats possibles pour une meme lecture selon
-// le chemin emprunte -- et un format « 11066:21 h » qu'aucun consommateur MQTT
-// ne sait relire comme un nombre.
+// It does NOT convert to hours. That conversion belongs to the XML unit: CS
+// carries <calc get="V/3600"/> and the entity "Stunden". A hard-coded
+// `if raw > 3600 { raw / 3600 }` here opened a second path for the same
+// conversion — two possible results for one reading depending on which path ran
+// — and produced a "11066:21 h" format no MQTT consumer can read as a number.
 //
-// La valeur brute est rendue telle quelle ; c'est le formateur, adosse au XML,
-// qui lui donne son sens.
+// The raw value is returned as-is; the formatter, backed by the XML, is what
+// gives it meaning.
 func (vd *ValueDecoder) DecodeCycleTime(data []byte, dataType string) string {
 	if dataType == "Int4" && len(data) >= 4 {
 		raw := uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24

@@ -1,4 +1,4 @@
-// Package viessmann - Construction des points de mesure a partir de vito.xml
+// Package viessmann - building data points from vito.xml.
 package viessmann
 
 import (
@@ -10,15 +10,14 @@ import (
 	"github.com/yourusername/vcontrold-go/internal/xml"
 )
 
-// AddressSpec designe une adresse a lire, avec une longueur facultative.
+// AddressSpec names an address to read, with an optional length.
 type AddressSpec struct {
 	Address uint16
-	Size    int    // 0 = prendre la longueur de vito.xml
-	Name    string // vide = prendre la description de vito.xml
+	Size    int    // 0 = take the length from vito.xml
+	Name    string // empty = take the description from vito.xml
 }
 
-// DataTypeForSize traduit une longueur en octets vers le type attendu par le
-// formateur de valeurs.
+// DataTypeForSize maps a byte length to the type the value formatter expects.
 func DataTypeForSize(size int) string {
 	switch {
 	case size >= 4:
@@ -30,20 +29,20 @@ func DataTypeForSize(size int) string {
 	}
 }
 
-// BuildDataPointsFromXML construit les points de mesure des adresses demandees
-// en resolvant longueur, unite et libelle depuis vito.xml.
+// BuildDataPointsFromXML builds the data points for the requested addresses,
+// resolving length, unit and label from vito.xml.
 //
-// C'est ce qui remplace la liste de datapoints DP_Listen_2.zip : ce fichier
-// n'existe sur aucune branche publique de optolink-splitter, et vito.xml porte
-// deja tout ce dont on a besoin. Voir PLAN.md, tache 7.
+// This replaces the DP_Listen_2.zip datapoint list: that file exists on no
+// public branch of optolink-splitter, and vito.xml already carries everything
+// needed.
 func BuildDataPointsFromXML(specs []AddressSpec) ([]config.DataPoint, error) {
 	if len(specs) == 0 {
 		return nil, nil
 	}
 
-	// Deduplication : une meme adresse peut figurer dans un groupe de
-	// rafraichissement et dans la liste MQTT. La specification la plus precise
-	// (taille forcee, nom explicite) l'emporte.
+	// Deduplicate: the same address may appear both in a refresh group and in
+	// the MQTT list. The more specific spec — forced size, explicit name —
+	// wins.
 	merged := make(map[uint16]AddressSpec, len(specs))
 	for _, spec := range specs {
 		existing, seen := merged[spec.Address]
@@ -87,8 +86,8 @@ func BuildDataPointsFromXML(specs []AddressSpec) ([]config.DataPoint, error) {
 			}
 			unit = mapping.Unit
 		} else if size == 0 {
-			// Ni le XML ni la configuration ne donnent de longueur : deviner
-			// serait publier une valeur fausse sans le dire.
+			// Neither the XML nor the configuration gives a length. Guessing
+			// would publish a wrong value without saying so.
 			unresolved = append(unresolved, fmt.Sprintf("0x%04X", addr))
 			continue
 		}
@@ -114,8 +113,8 @@ func BuildDataPointsFromXML(specs []AddressSpec) ([]config.DataPoint, error) {
 	return dataPoints, nil
 }
 
-// LoadDataPointsFromXML remplit les points de mesure du lecteur a partir des
-// adresses referencees par la configuration YAML.
+// LoadDataPointsFromXML fills the reader's data points from the addresses the
+// YAML configuration refers to.
 func (r *Reader) LoadDataPointsFromXML(specs []AddressSpec) error {
 	dataPoints, err := BuildDataPointsFromXML(specs)
 	if err != nil {
@@ -135,8 +134,8 @@ func (r *Reader) LoadDataPointsFromXML(specs []AddressSpec) error {
 	return nil
 }
 
-// AddressSpecsFromYaml collecte les adresses a surveiller depuis la
-// configuration : groupes de rafraichissement et liste MQTT.
+// AddressSpecsFromYaml collects the addresses to monitor from the
+// configuration: refresh groups and the MQTT list.
 func AddressSpecsFromYaml(yamlConfig *config.YamlConfig) ([]AddressSpec, error) {
 	if yamlConfig == nil {
 		return nil, nil
