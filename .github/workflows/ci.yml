@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Several tests read the community vito.xml and skip without it, which
+      # would quietly hollow out the run. Fetching it keeps them meaningful.
+      - name: Fetch community XML
+        run: make deps
+
+      - name: Lint
+        run: |
+          make tools
+          make lint
+
+      # The daemon drives one serial port from several refresh goroutines, so a
+      # data race is a realistic failure, not a theoretical one.
+      - name: Test (race detector)
+        run: make test-race
+
+      - name: Coverage
+        run: make cover
+
+      - name: Build
+        run: make build

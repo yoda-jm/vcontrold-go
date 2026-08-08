@@ -34,6 +34,25 @@ A modern Go-based monitoring and control system for Viessmann V200KW2 heating sy
 - Serial access to Viessmann V200KW2 heating system
 - vcontrold XML configuration files
 
+### Development
+
+```bash
+make lint        # gofmt + go vet + staticcheck (pinned version)
+make test        # unit tests
+make test-race   # tests under the race detector
+make cover       # coverage per package
+make tools       # install the pinned lint tooling
+```
+
+`make deps` must have run before the tests: several of them read the community
+`vito.xml` and skip without it, which would quietly hollow out the run.
+
+The unit tests deliberately assert the things that fail *silently* on real
+hardware — a discovery payload missing its `state_class`, a setpoint encoded on
+two bytes instead of one, a reserved "no data" value published as a
+measurement. None of those surface as a crash; they surface as wrong history
+weeks later.
+
 ### Building
 
 ```bash
