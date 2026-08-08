@@ -53,6 +53,10 @@ backup/
 xml/
 *.xml
 
+# ...sauf les surcharges d'adresses propres a la machine : elles constatent un
+# ecart mesure avec vito.xml et doivent survivre a un `make deps`.
+!overrides/*.xml
+
 # Test data
 test_data/
 # Binaires compiles a la racine (pas d'extension)

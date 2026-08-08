@@ -65,14 +65,14 @@ type ReaderInterface interface {
 	GetDataPoints() []config.DataPoint
 	ReadAll() ([]Reading, error)
 	ReadParameter(dp config.DataPoint, index int) Reading
-	
+
 	// Cache operations
 	GetCachedReading(address uint16) (*CachedReading, bool)
 	GetAllCachedReadings() map[uint16]*CachedReading
 	GetCacheStats() map[string]interface{}
 	GetRecentlyChanged(since time.Duration) []uint16
 	ClearCache()
-	
+
 	// Refresh management
 	SetupAutoRefresh(autoConfig *config.AutoRefreshConfig) error
 	GetAutoRefreshStatus() map[string]interface{}
@@ -80,11 +80,11 @@ type ReaderInterface interface {
 	SetupMultiGroupRefresh(groups []config.RefreshGroup) error
 	GetMultiGroupRefreshStatus() map[string]interface{}
 	UpdateMultiGroupRefresh(newGroups []config.RefreshGroup) error
-	
+
 	// Cache callbacks
 	AddCacheCallback(callback CacheCallback)
 	RemoveAllCacheCallbacks()
-	
+
 	// Lifecycle
 	Close() error
 }

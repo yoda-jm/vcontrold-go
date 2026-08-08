@@ -290,3 +290,73 @@ en octobre 2025). L'écart donnera le rythme de cyclage sur dix mois.
 Pour les heures : toute valeur cohérente avec ~197 000 démarrages, soit des
 dizaines de milliers d'heures. **Si le résultat ressemble à `15.1`, la tâche 6
 n'est pas faite** ou le compteur a été remis à zéro.
+
+---
+
+## Résultat de l'exécution — 8 août 2026
+
+### L'objectif métier est atteint
+
+Lecture réelle sur la chaudière, depuis la machine cible (adaptateur CH340,
+`usb-1a86_USB_Serial-if00-port0`) :
+
+| Compteur | Adresse | Valeur | Brut |
+|---|---|---|---|
+| Heures brûleur | `0x08A7` (4 o, unité CS) | **11 066,2 h** | `92 E2 5F 02` |
+| Démarrages | `0x088A` (**4 o**) | **206 315** | `EB 25 03 00` |
+
+Le critère de cohérence est vérifié : **206 315 > 196 980** (octobre 2025), soit
+**9 335 démarrages en dix mois ≈ 31/jour**. Les heures ne ressemblent pas à
+`15.1` — la tâche 6 n'était donc pas la cause de l'ambiguïté d'octobre.
+
+**Ratio : 3,2 min de combustion par démarrage.** C'est du court-cycle marqué, et
+c'est directement exploitable pour le dimensionnement de la PAC.
+
+### Ce que le plan n'avait pas vu
+
+1. **`vito.xml` se trompe sur `getBrennerStarts`** : il déclare `len 2`, or le
+   compteur fait 4 octets. Lu sur 2 octets il donne 9707 — le mot de poids
+   faible. Corrigé par `overrides/vitola200-kw2.xml`, sans toucher au XML amont.
+
+2. **`setBetriebArtM1` est à `0x2301`**, pas `0x2323` comme configuré jusqu'ici.
+   Seconde raison, indépendante de l'opcode, pour laquelle l'écriture du mode
+   n'a jamais rien piloté.
+
+3. **`getTempWWist` est à `0x0804`**, pas `0x0810`. `0x0810` et `0x0811`
+   n'existent pas dans `vito.xml`.
+
+4. **Le daemon ne publiait rien sans la liste `DP_Listen`** : les groupes de
+   rafraîchissement ne lisent que les adresses présentes dans les *data points*,
+   qui ne venaient que de ce fichier absent de l'amont. Les points de mesure sont
+   désormais construits depuis `vito.xml` (tâche 7 close par la même occasion).
+
+5. **`make run-remote` passait `--config`** — la liste de datapoints — au lieu de
+   `--yaml-config`. Le daemon démarrait donc sans MQTT ni groupes.
+
+6. **MQTT n'existe qu'en mode web.** `web: true` est obligatoire ; en mode CLI le
+   daemon lit une fois et sort.
+
+7. **La consigne ECS était écrite sur 2 octets** aussi bien par le contrôleur
+   climatique que par les hooks. Les longueurs d'écriture viennent maintenant du
+   XML, et un débordement est une erreur, jamais une troncature silencieuse.
+
+8. **Deux groupes de rafraîchissement concurrents désynchronisent la
+   régulation.** Le mutex rendait chaque transaction atomique mais pas espacée :
+   le groupe arrivant en second échouait systématiquement. Un repos de 100 ms
+   entre transactions (`KW2_SETTLE_DELAY_MS`) suffit. Corollaire : borner
+   `readNBytes` par un *nombre* de tentatives est trop sévère — la régulation
+   n'émet son `05` que par intermittence. Seule une échéance de durée convient.
+
+### Reste à faire
+
+**Le broker MQTT refuse toute écriture.** Il répond
+`PUBACK RC:135 (Not authorized)` en MQTT v5 pour `vcontrold`, `vcontrol` et
+`homeassistant`, sur tous les topics. Le compte qui publiait autrefois
+(`vcontrold`, topic `Viessmann`) n'existe plus : il est refusé dès le CONNECT.
+Rien sur la machine cible ne permet de le retrouver — historique, `sources/` et
+`settings_ini.py` pointent tous vers ce même identifiant périmé.
+
+Il faut recréer le compte sur le broker, avec le droit d'écrire sur `openv/#` et
+`homeassistant/#`. Tout le reste est prêt : les neuf adresses sont lues et
+publiées sans erreur, et la découverte Home Assistant part avec les
+`state_class`.

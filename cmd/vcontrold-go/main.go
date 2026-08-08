@@ -15,16 +15,29 @@ import (
 	"github.com/yourusername/vcontrold-go/internal/xml"
 )
 
+// singleRead describes the -address / -size probing mode.
+type singleRead struct {
+	address string // hex address, empty when not in single-read mode
+	size    int    // 0 = take the length from vito.xml
+}
+
 func main() {
-	cfg, singleAddress, err := parseConfiguration()
+	cfg, probe, err := parseConfiguration()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	
 
+	// Les XML communautaires manquants degradent le formatage sans empecher de
+	// lire : on se contente d'un avertissement.
 	if err := initializeXMLSystems(cfg); err != nil {
 		fmt.Printf("Warning: XML initialization issues: %v\n", err)
+	}
+
+	// Les surcharges, elles, portent des longueurs de lecture. Les ignorer
+	// silencieusement republierait des compteurs tronques : on s'arrete.
+	if err := xml.LoadAddressMappingOverrides(cfg.VitoOverridesXML); err != nil {
+		log.Fatalf("Failed to apply address overrides: %v", err)
 	}
 
 	reader, err := initializeReader(cfg)
@@ -33,27 +46,27 @@ func main() {
 	}
 	defer reader.Close()
 
-	if err := runApplication(reader, cfg, singleAddress); err != nil {
+	if err := runApplication(reader, cfg, probe); err != nil {
 		log.Fatalf("Application error: %v", err)
 	}
 }
 
 // readSingleAddress reads a single parameter by hex address
-func readSingleAddress(reader *viessmann.Reader, addressStr string, cfg *config.Config) error {
+func readSingleAddress(reader *viessmann.Reader, addressStr string, cfg *config.Config, sizeOverride int) error {
 	// Parse the address
 	addressStr = strings.TrimPrefix(strings.ToLower(addressStr), "0x")
 	address, err := strconv.ParseUint(addressStr, 16, 16)
 	if err != nil {
 		return errors.Wrap(errors.ErrValidation, fmt.Sprintf("invalid hex address '%s'", addressStr), err)
 	}
-	
+
 	fmt.Printf("Reading parameter at address 0x%04X...\n", address)
-	
+
 	// Try to find this address in loaded configuration
 	dataPoints := reader.GetDataPoints()
 	var foundDataPoint *config.DataPoint
 	var foundIndex int
-	
+
 	for i, dp := range dataPoints {
 		if dp.Address == uint16(address) {
 			foundDataPoint = &dp
@@ -61,14 +74,14 @@ func readSingleAddress(reader *viessmann.Reader, addressStr string, cfg *config.
 			break
 		}
 	}
-	
+
 	if foundDataPoint != nil {
 		// Found in configuration - use existing parameter
 		fmt.Printf("Found parameter: %s\n", foundDataPoint.Name)
 		fmt.Printf("Type: %s, Size: %d bytes\n", foundDataPoint.DataType, foundDataPoint.Size)
-		
+
 		reading := reader.ReadParameter(*foundDataPoint, foundIndex)
-		
+
 		if reading.Success {
 			fmt.Printf("Value: %s\n", reading.FormattedValue)
 			if cfg.Verbose {
@@ -81,35 +94,47 @@ func readSingleAddress(reader *viessmann.Reader, addressStr string, cfg *config.
 			return errors.New(errors.ErrCommunication, "parameter reading failed")
 		}
 	} else {
-		// Not found in configuration - try to read with defaults
-		fmt.Printf("Address not found in configuration, attempting to read with defaults...\n")
-		
-		// Get unit info from XML mappings if available
-		unitInfo := xml.GetDetailedUnitInfo(uint16(address), "Unknown Parameter")
-		
-		// Determine size and data type based on unit info or use defaults
-		size := 2        // Default size
-		dataType := "Int" // Default type
-		
-		if unitInfo.VitoUnit != "" {
-			// Use size from vito.xml if available
-			if _, exists := xml.GetUnitForAddress(uint16(address)); exists {
-				// Could parse length from vito.xml mapping here if needed
+		// Not found in configuration - derive what we can from vito.xml
+		fmt.Printf("Address not found in configuration, resolving from vito.xml...\n")
+
+		size := 2         // Fallback size
+		dataType := "Int" // Fallback type
+		name := fmt.Sprintf("Unknown_0x%04X", address)
+		source := "defaults (address absent from vito.xml)"
+
+		// La longueur du XML fait foi : deviner 2 octets tronque les compteurs
+		// 4 octets (getBrennerStunden1) et fausse silencieusement le resultat.
+		if mapping, exists := xml.GetAddressMapping(uint16(address)); exists {
+			if mapping.Length > 0 {
+				size = mapping.Length
 			}
+			dataType = viessmann.DataTypeForSize(size)
+			if mapping.Description != "" {
+				name = mapping.Description
+			}
+			source = fmt.Sprintf("vito.xml (unit %s)", mapping.Unit)
 		}
-		
+
+		// L'operateur peut forcer la taille pour sonder une adresse dont le XML
+		// ne dit rien, ou dont on soupconne la longueur d'etre fausse.
+		if sizeOverride > 0 {
+			size = sizeOverride
+			dataType = viessmann.DataTypeForSize(size)
+			source = "-size override"
+		}
+
 		// Create a temporary data point
 		tempDP := config.DataPoint{
-			Name:     fmt.Sprintf("Unknown_0x%04X", address),
+			Name:     name,
 			Address:  uint16(address),
 			Size:     size,
 			DataType: dataType,
 		}
-		
-		fmt.Printf("Using defaults: Type=%s, Size=%d bytes\n", dataType, size)
-		
+
+		fmt.Printf("Using %s: Type=%s, Size=%d bytes\n", source, dataType, size)
+
 		reading := reader.ReadParameter(tempDP, -1)
-		
+
 		if reading.Success {
 			fmt.Printf("Value: %s\n", reading.FormattedValue)
 			if cfg.Verbose {
@@ -122,14 +147,14 @@ func readSingleAddress(reader *viessmann.Reader, addressStr string, cfg *config.
 			return errors.New(errors.ErrCommunication, "parameter reading failed")
 		}
 	}
-	
+
 	return nil
 }
 
 // parseConfiguration handles command line flag parsing and YAML config loading
-func parseConfiguration() (*config.Config, string, error) {
+func parseConfiguration() (*config.Config, singleRead, error) {
 	cfg := config.New()
-	
+
 	// Command line flags
 	var yamlConfigFile string
 	flag.StringVar(&yamlConfigFile, "yaml-config", "", "YAML configuration file (overrides other flags)")
@@ -137,28 +162,31 @@ func parseConfiguration() (*config.Config, string, error) {
 	flag.StringVar(&cfg.ConfigFile, "config", "", "V200KW2 configuration file to parse (supports zip: zipfile.zip:internal/file.txt)")
 	flag.StringVar(&cfg.VControlXML, "vcontrol-xml", "", "Path to vcontrold.xml unit definitions")
 	flag.StringVar(&cfg.VitoXML, "vito-xml", "", "Path to vito.xml address mappings")
+	flag.StringVar(&cfg.VitoOverridesXML, "vito-overrides-xml", "", "Path to machine-specific address overrides applied over vito.xml")
 	flag.StringVar(&cfg.WebPort, "port", "8080", "HTTP server port")
 	flag.BoolVar(&cfg.WebMode, "web", false, "Start web server instead of CLI")
 	flag.BoolVar(&cfg.Verbose, "verbose", false, "Show verbose output")
-	
+
 	// Single parameter reading mode
-	var singleAddress string
-	flag.StringVar(&singleAddress, "address", "", "Read single parameter by hex address (e.g., 0x5525)")
-	
+	var probe singleRead
+	flag.StringVar(&probe.address, "address", "", "Read single parameter by hex address (e.g., 0x5525)")
+	flag.IntVar(&probe.size, "size", 0, "Override read length in bytes for -address (0 = use vito.xml)")
+
 	flag.Parse()
-	
+
 	// Load YAML config if provided (overrides command line flags)
 	if yamlConfigFile != "" {
 		yamlConfig, err := config.LoadYamlConfig(yamlConfigFile)
 		if err != nil {
-			return nil, "", errors.Wrap(errors.ErrConfig, "failed to load YAML config", err)
+			return nil, probe, errors.Wrap(errors.ErrConfig, "failed to load YAML config", err)
 		}
-		
+
 		// Override config with YAML values
 		cfg.Device = yamlConfig.Device
 		cfg.ConfigFile = yamlConfig.ConfigFile
 		cfg.VControlXML = yamlConfig.VControlXML
 		cfg.VitoXML = yamlConfig.VitoXML
+		cfg.VitoOverridesXML = yamlConfig.VitoOverridesXML
 		cfg.WebPort = yamlConfig.WebPort
 		cfg.WebMode = yamlConfig.WebMode
 		cfg.Verbose = yamlConfig.Verbose
@@ -173,7 +201,7 @@ func parseConfiguration() (*config.Config, string, error) {
 	if cfg.VitoXML == "" {
 		cfg.VitoXML = "xml/vito.xml"
 	}
-	
+
 	// Show configuration if verbose
 	if cfg.Verbose {
 		fmt.Printf("Configuration:\n")
@@ -185,13 +213,17 @@ func parseConfiguration() (*config.Config, string, error) {
 		fmt.Printf("  Web Mode: %t\n", cfg.WebMode)
 	}
 
-	return cfg, singleAddress, nil
+	return cfg, probe, nil
 }
 
 // initializeXMLSystems loads XML unit definitions and address mappings
 func initializeXMLSystems(cfg *config.Config) error {
+	if cfg == nil {
+		return errors.New(errors.ErrConfig, "cannot initialize XML systems without a configuration")
+	}
+
 	var errorList []string
-	
+
 	// Load XML unit definitions
 	if err := xml.LoadUnits(cfg.VControlXML); err != nil {
 		errorList = append(errorList, fmt.Sprintf("Could not load XML units from %s: %v", cfg.VControlXML, err))
@@ -205,11 +237,11 @@ func initializeXMLSystems(cfg *config.Config) error {
 		fmt.Printf("Warning: Could not load vito.xml from %s: %v\n", cfg.VitoXML, err)
 		fmt.Printf("Continuing without address-unit mappings...\n")
 	}
-	
+
 	if len(errorList) > 0 {
 		return errors.New(errors.ErrConfig, fmt.Sprintf("XML initialization issues: %s", strings.Join(errorList, "; ")))
 	}
-	
+
 	return nil
 }
 
@@ -221,24 +253,40 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 		return nil, errors.Wrap(errors.ErrCommunication, "failed to create Viessmann reader", err)
 	}
 
-	// Load configuration if provided
-	if cfg.ConfigFile != "" {
+	// Deux sources possibles pour les points de mesure. La liste de datapoints
+	// (DP_Listen) reste acceptee si elle est fournie, mais elle n'existe sur
+	// aucune branche publique amont : par defaut on derive tout de vito.xml,
+	// a partir des adresses que la configuration YAML declare surveiller.
+	switch {
+	case cfg.ConfigFile != "":
 		if err := reader.LoadConfig(cfg.ConfigFile); err != nil {
 			reader.Close()
 			return nil, errors.Wrap(errors.ErrConfig, "failed to load config file", err)
 		}
+	case cfg.YamlConfig != nil:
+		specs, err := viessmann.AddressSpecsFromYaml(cfg.YamlConfig)
+		if err != nil {
+			reader.Close()
+			return nil, errors.Wrap(errors.ErrConfig, "failed to collect addresses from YAML config", err)
+		}
+		if len(specs) > 0 {
+			if err := reader.LoadDataPointsFromXML(specs); err != nil {
+				reader.Close()
+				return nil, errors.Wrap(errors.ErrConfig, "failed to build data points from vito.xml", err)
+			}
+		}
 	}
-	
+
 	// Setup auto refresh if YAML config is available
 	if cfg.YamlConfig != nil && cfg.YamlConfig.AutoRefresh.Enabled {
 		if err := reader.SetupAutoRefresh(&cfg.YamlConfig.AutoRefresh); err != nil {
 			log.Printf("Warning: Failed to setup auto refresh: %v", err)
 		} else {
-			log.Printf("Auto refresh configured for %d addresses every %s", 
+			log.Printf("Auto refresh configured for %d addresses every %s",
 				len(cfg.YamlConfig.AutoRefresh.Addresses), cfg.YamlConfig.AutoRefresh.Interval)
 		}
 	}
-	
+
 	// Setup multi-group refresh if YAML config has refresh groups
 	if cfg.YamlConfig != nil && len(cfg.YamlConfig.RefreshGroups) > 0 {
 		if err := reader.SetupMultiGroupRefresh(cfg.YamlConfig.RefreshGroups); err != nil {
@@ -252,19 +300,19 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 					totalAddresses += len(group.Addresses)
 				}
 			}
-			log.Printf("Multi-group refresh configured: %d enabled groups with %d total addresses", 
+			log.Printf("Multi-group refresh configured: %d enabled groups with %d total addresses",
 				enabledGroups, totalAddresses)
 		}
 	}
-	
+
 	return reader, nil
 }
 
 // runApplication handles the main application logic based on mode
-func runApplication(reader *viessmann.Reader, cfg *config.Config, singleAddress string) error {
+func runApplication(reader *viessmann.Reader, cfg *config.Config, probe singleRead) error {
 	// Handle single address reading mode
-	if singleAddress != "" {
-		return readSingleAddress(reader, singleAddress, cfg)
+	if probe.address != "" {
+		return readSingleAddress(reader, probe.address, cfg, probe.size)
 	}
 
 	if cfg.WebMode {
@@ -282,22 +330,22 @@ func runApplication(reader *viessmann.Reader, cfg *config.Config, singleAddress 
 func runCLIMode(reader *viessmann.Reader, cfg *config.Config) error {
 	fmt.Println("vcontrold-go - Viessmann V200KW2 Reader")
 	fmt.Println("Use -web flag to start web interface")
-	
+
 	if cfg.ConfigFile == "" {
 		fmt.Println("No config file specified. Use -config flag or -web for web interface.")
 		os.Exit(1)
 	}
-	
+
 	// Read all parameters once in CLI mode
 	readings, err := reader.ReadAll()
 	if err != nil {
 		return errors.Wrap(errors.ErrCommunication, "failed to read parameters", err)
 	}
-	
+
 	fmt.Printf("Successfully read %d parameters:\n", len(readings))
 	for _, reading := range readings {
 		fmt.Printf("%s (0x%04X): %s\n", reading.Name, reading.Address, reading.FormattedValue)
 	}
-	
+
 	return nil
 }

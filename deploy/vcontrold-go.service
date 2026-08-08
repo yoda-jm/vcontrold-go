@@ -1,0 +1,41 @@
+# Modele. Remplacer CHANGEME_USER et CHANGEME_DIR par les valeurs de .env
+# (TARGET_DIR), puis installer dans /etc/systemd/system/.
+
+[Unit]
+Description=vcontrold-go — lecture Optolink de la Vitola 200 et publication MQTT
+Documentation=https://github.com/openv/vcontrold
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=CHANGEME_USER
+# Le groupe dialout donne l'acces a /dev/ttyUSB*.
+SupplementaryGroups=dialout
+WorkingDirectory=CHANGEME_DIR
+ExecStart=CHANGEME_DIR/vcontrold-go --yaml-config config-openv.yaml
+
+# La liaison optique tombe si l'adaptateur est debranche : on relance, mais
+# sans s'acharner -- inutile de marteler le port serie.
+Restart=on-failure
+RestartSec=30s
+
+# La configuration porte les identifiants MQTT.
+UMask=0077
+
+# Confinement : ce service ne fait que lire un port serie et parler MQTT.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=CHANGEME_DIR
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vcontrold-go
+
+[Install]
+WantedBy=multi-user.target

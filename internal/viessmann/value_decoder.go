@@ -83,28 +83,28 @@ func (vd *ValueDecoder) ParseBCDDateTime(data []byte) string {
 	return fmt.Sprintf("20%02d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, minute, second)
 }
 
-// DecodeCycleTime decodes cycle time data into a readable format
+// DecodeCycleTime decodes cycle time data into a readable format.
+//
+// Cette fonction ne convertit PAS en heures. La conversion appartient a l'unite
+// du XML : CS porte <calc get="V/3600"/> et l'entite « Stunden ». Le
+// `if raw > 3600 { raw / 3600 }` code en dur ici ouvrait un second chemin pour
+// la meme conversion, donc deux resultats possibles pour une meme lecture selon
+// le chemin emprunte -- et un format « 11066:21 h » qu'aucun consommateur MQTT
+// ne sait relire comme un nombre.
+//
+// La valeur brute est rendue telle quelle ; c'est le formateur, adosse au XML,
+// qui lui donne son sens.
 func (vd *ValueDecoder) DecodeCycleTime(data []byte, dataType string) string {
 	if dataType == "Int4" && len(data) >= 4 {
-		// Cycle time as 32-bit integer (seconds or cycles)
 		raw := uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24
-		
-		// Convert to hours and minutes if it looks like seconds
-		if raw > 3600 {
-			hours := raw / 3600
-			minutes := (raw % 3600) / 60
-			return fmt.Sprintf("%d:%02d h", hours, minutes)
-		}
-		
-		return fmt.Sprintf("%d cycles", raw)
+		return fmt.Sprintf("%d", raw)
 	}
-	
+
 	if dataType == "Int" && len(data) >= 2 {
-		// Cycle time as 16-bit integer
 		raw := uint16(data[0]) | uint16(data[1])<<8
-		return fmt.Sprintf("%d cycles", raw)
+		return fmt.Sprintf("%d", raw)
 	}
-	
+
 	return ""
 }
 
@@ -113,7 +113,7 @@ func (vd *ValueDecoder) DecodeErrorState(data []byte, unitType string) string {
 	if len(data) == 0 {
 		return ""
 	}
-	
+
 	// Single byte error states
 	if len(data) == 1 {
 		errorCode := data[0]
@@ -130,13 +130,13 @@ func (vd *ValueDecoder) DecodeErrorState(data []byte, unitType string) string {
 			return fmt.Sprintf("Error Code %d", errorCode)
 		}
 	}
-	
+
 	// Multi-byte error states
 	if len(data) >= 2 {
 		errorCode := uint16(data[0]) | uint16(data[1])<<8
 		return fmt.Sprintf("Error Code %d", errorCode)
 	}
-	
+
 	return ""
 }
 

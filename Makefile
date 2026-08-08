@@ -1,3 +1,8 @@
+# Surchargeables : make deploy TARGET_HOST=user@host
+# Les valeurs reelles sont dans .env, non versionne.
+-include .env
+export
+
 TARGET_HOST ?= user@boiler-host.local
 TARGET_DIR  ?= /opt/vcontrold-go
 BIN         := vcontrold-go
@@ -30,11 +35,12 @@ lint:
 deploy: build
 	ssh $(TARGET_HOST) 'mkdir -p $(TARGET_DIR)/third_party'
 	rsync -az --delete third_party/vcontrold/xml $(TARGET_HOST):$(TARGET_DIR)/third_party/vcontrold/
+	rsync -az overrides $(TARGET_HOST):$(TARGET_DIR)/
 	rsync -az $(BIN) config-openv.yaml $(TARGET_HOST):$(TARGET_DIR)/
 	@echo "déployé sur $(TARGET_HOST):$(TARGET_DIR)"
 
 run-remote:
-	ssh -t $(TARGET_HOST) 'cd $(TARGET_DIR) && ./$(BIN) --config config-openv.yaml'
+	ssh -t $(TARGET_HOST) 'cd $(TARGET_DIR) && ./$(BIN) --yaml-config config-openv.yaml'
 
 # Lecture seule : les deux compteurs qui manquent au dossier énergie.
 probe:

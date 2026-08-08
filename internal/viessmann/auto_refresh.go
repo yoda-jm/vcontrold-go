@@ -26,13 +26,13 @@ func NewAutoRefresher(reader *Reader, autoConfig *config.AutoRefreshConfig) (*Au
 	if autoConfig == nil {
 		return nil, errors.New(errors.ErrValidation, "auto refresh config cannot be nil")
 	}
-	
+
 	// Validate and parse addresses
 	addresses, err := autoConfig.GetAddressesAsUint16()
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrValidation, "invalid addresses in auto refresh config", err)
 	}
-	
+
 	return &AutoRefresher{
 		reader:    reader,
 		config:    autoConfig,
@@ -46,25 +46,25 @@ func (ar *AutoRefresher) Start() error {
 	if ar.running {
 		return errors.New(errors.ErrValidation, "auto refresher is already running")
 	}
-	
+
 	if !ar.config.Enabled || len(ar.addresses) == 0 {
 		log.Printf("Auto refresh is disabled or no addresses configured")
 		return nil
 	}
-	
+
 	duration, err := ar.config.GetRefreshDuration()
 	if err != nil {
 		return errors.Wrap(errors.ErrValidation, "invalid refresh interval", err)
 	}
-	
+
 	log.Printf("Starting auto refresh for %d addresses every %v", len(ar.addresses), duration)
-	
+
 	ar.ticker = time.NewTicker(duration)
 	ar.running = true
-	
+
 	// Start the refresh goroutine
 	go ar.refreshLoop()
-	
+
 	return nil
 }
 
@@ -73,14 +73,14 @@ func (ar *AutoRefresher) Stop() {
 	if !ar.running {
 		return
 	}
-	
+
 	log.Printf("Stopping auto refresh")
 	ar.stopCh <- true
-	
+
 	if ar.ticker != nil {
 		ar.ticker.Stop()
 	}
-	
+
 	ar.running = false
 }
 
@@ -92,7 +92,7 @@ func (ar *AutoRefresher) IsRunning() bool {
 // GetStatus returns the current status of auto refresh
 func (ar *AutoRefresher) GetStatus() map[string]interface{} {
 	duration, _ := ar.config.GetRefreshDuration()
-	
+
 	return map[string]interface{}{
 		"enabled":       ar.config.Enabled,
 		"running":       ar.running,
@@ -109,28 +109,28 @@ func (ar *AutoRefresher) UpdateConfig(newConfig *config.AutoRefreshConfig) error
 	if err := newConfig.ValidateAddresses(); err != nil {
 		return errors.Wrap(errors.ErrValidation, "invalid configuration", err)
 	}
-	
+
 	// Parse addresses
 	addresses, err := newConfig.GetAddressesAsUint16()
 	if err != nil {
 		return errors.Wrap(errors.ErrValidation, "failed to parse addresses", err)
 	}
-	
+
 	// Stop current refresh if running
 	wasRunning := ar.running
 	if ar.running {
 		ar.Stop()
 	}
-	
+
 	// Update configuration
 	ar.config = newConfig
 	ar.addresses = addresses
-	
+
 	// Restart if it was running and still enabled
 	if wasRunning && newConfig.Enabled {
 		return ar.Start()
 	}
-	
+
 	return nil
 }
 
@@ -139,7 +139,7 @@ func (ar *AutoRefresher) refreshLoop() {
 	defer func() {
 		ar.running = false
 	}()
-	
+
 	for {
 		select {
 		case <-ar.ticker.C:
@@ -154,19 +154,19 @@ func (ar *AutoRefresher) refreshLoop() {
 // refreshAddresses refreshes all configured addresses
 func (ar *AutoRefresher) refreshAddresses() {
 	log.Printf("Auto refresh: reading %d addresses", len(ar.addresses))
-	
+
 	dataPoints := ar.reader.GetDataPoints()
 	addressToDP := make(map[uint16]config.DataPoint)
 	addressToIndex := make(map[uint16]int)
-	
+
 	// Create lookup maps
 	for i, dp := range dataPoints {
 		addressToDP[dp.Address] = dp
 		addressToIndex[dp.Address] = i
 	}
-	
+
 	successCount := 0
-	
+
 	for _, address := range ar.addresses {
 		if dp, exists := addressToDP[address]; exists {
 			if index, indexExists := addressToIndex[address]; indexExists {
@@ -182,11 +182,11 @@ func (ar *AutoRefresher) refreshAddresses() {
 		} else {
 			log.Printf("Auto refresh: 0x%04X not found in data points", address)
 		}
-		
+
 		// Small delay between reads to avoid overwhelming the device
 		time.Sleep(protocol.KW2_READ_DELAY_MS * time.Millisecond)
 	}
-	
+
 	log.Printf("Auto refresh completed: %d/%d successful", successCount, len(ar.addresses))
 }
 
@@ -204,12 +204,12 @@ func (ar *AutoRefresher) GetNextRefreshTime() *time.Time {
 	if !ar.running || ar.ticker == nil {
 		return nil
 	}
-	
+
 	duration, err := ar.config.GetRefreshDuration()
 	if err != nil {
 		return nil
 	}
-	
+
 	nextTime := time.Now().Add(duration)
 	return &nextTime
 }

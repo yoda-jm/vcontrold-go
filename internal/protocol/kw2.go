@@ -3,18 +3,29 @@
 package protocol
 
 // KW2 Protocol Commands
+//
+// Ces valeurs proviennent du bloc <protocol name="KW2"> de vcontrold.xml :
+//
+//	<macro name="SYNC">    <command>SEND 04;WAIT 05</command></macro>
+//	<macro name="GETADDR"> <command>SEND 01 F7</command></macro>
+//	<macro name="SETADDR"> <command>SEND 01 F4</command></macro>
 const (
-	// Reset command sent to initialize the protocol connection
+	// Reset command sent to initialize the protocol connection (macro SYNC)
 	KW2_RESET_CMD = 0x04
-	
-	// Expected acknowledgment response after reset
+
+	// Expected acknowledgment response after reset (macro SYNC : WAIT 05)
 	KW2_ACK_RESPONSE = 0x05
-	
+
 	// Start byte for KW2 protocol messages
 	KW2_START_BYTE = 0x01
-	
-	// Initialization value for checksum calculations
-	KW2_CHECKSUM_INIT = 0xF7
+
+	// Opcode de lecture, second octet de la macro GETADDR (SEND 01 F7).
+	// Anciennement nomme KW2_CHECKSUM_INIT : ce n'a jamais ete un checksum,
+	// et cette confusion est a l'origine du chemin d'ecriture defectueux.
+	KW2_CMD_READ = 0xF7
+
+	// Opcode d'ecriture, second octet de la macro SETADDR (SEND 01 F4).
+	KW2_CMD_WRITE = 0xF4
 )
 
 // Serial Communication Parameters for V200KW2
@@ -45,6 +56,21 @@ const (
 	
 	// Maximum number of retry attempts for failed operations
 	KW2_MAX_RETRIES = 3
+
+	// Echeance globale d'une lecture de trame, toutes tentatives comprises.
+	// Sans elle, un port qui ne repond jamais fige le daemon : readNBytes
+	// boucle en tenant le mutex du communicateur serie.
+	//
+	// Large a dessein. La regulation n'emet son 05 de synchronisation que par
+	// intermittence : une borne trop courte fait echouer les lectures alors que
+	// la liaison est saine. A 4800 bauds, 8N2, meme huit octets ne prennent que
+	// ~19 ms -- ce delai ne borne donc pas la transmission, mais l'attente.
+	KW2_READ_DEADLINE_MS = 5000
+
+	// Repos impose entre deux transactions completes. Enchainer immediatement
+	// une nouvelle sequence SYNC alors que la precedente vient de s'achever
+	// desynchronise la regulation.
+	KW2_SETTLE_DELAY_MS = 100
 )
 
 // Data Processing Constants

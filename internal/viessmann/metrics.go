@@ -8,12 +8,12 @@ import (
 
 // Metrics implements performance monitoring for the viessmann package
 type Metrics struct {
-	mu                sync.RWMutex
-	readCount         int64
-	errorCount        int64
-	totalReadLatency  time.Duration
-	cacheHitRate      float64
-	lastResetTime     time.Time
+	mu               sync.RWMutex
+	readCount        int64
+	errorCount       int64
+	totalReadLatency time.Duration
+	cacheHitRate     float64
+	lastResetTime    time.Time
 }
 
 // NewMetrics creates a new metrics instance
@@ -27,7 +27,7 @@ func NewMetrics() *Metrics {
 func (m *Metrics) RecordReadLatency(duration time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.totalReadLatency += duration
 }
 
@@ -35,7 +35,7 @@ func (m *Metrics) RecordReadLatency(duration time.Duration) {
 func (m *Metrics) IncrementReadCount() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.readCount++
 }
 
@@ -43,7 +43,7 @@ func (m *Metrics) IncrementReadCount() {
 func (m *Metrics) IncrementErrorCount() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.errorCount++
 }
 
@@ -51,7 +51,7 @@ func (m *Metrics) IncrementErrorCount() {
 func (m *Metrics) RecordCacheHitRate(rate float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.cacheHitRate = rate
 }
 
@@ -59,17 +59,17 @@ func (m *Metrics) RecordCacheHitRate(rate float64) {
 func (m *Metrics) GetMetrics() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	avgLatency := time.Duration(0)
 	if m.readCount > 0 {
 		avgLatency = time.Duration(int64(m.totalReadLatency) / m.readCount)
 	}
-	
+
 	successRate := float64(0)
 	if m.readCount > 0 {
 		successRate = float64(m.readCount-m.errorCount) / float64(m.readCount) * 100
 	}
-	
+
 	return map[string]interface{}{
 		"read_count":         m.readCount,
 		"error_count":        m.errorCount,
@@ -85,7 +85,7 @@ func (m *Metrics) GetMetrics() map[string]interface{} {
 func (m *Metrics) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.readCount = 0
 	m.errorCount = 0
 	m.totalReadLatency = 0
@@ -111,7 +111,7 @@ func (m *Metrics) GetErrorCount() int64 {
 func (m *Metrics) GetAverageLatency() time.Duration {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	if m.readCount == 0 {
 		return 0
 	}

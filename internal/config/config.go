@@ -14,31 +14,32 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	Device         string
-	ConfigFile     string
-	VControlXML    string
-	VitoXML        string
-	WebPort        string
-	WebMode        bool
-	Verbose        bool
-	MQTTBroker     string
-	MQTTPort       int
-	MQTTUsername   string
-	MQTTPassword   string
-	MQTTTopic      string
-	YamlConfigFile string      // Path to YAML config file
-	YamlConfig     *YamlConfig // Loaded YAML configuration
+	Device           string
+	ConfigFile       string
+	VControlXML      string
+	VitoXML          string
+	VitoOverridesXML string
+	WebPort          string
+	WebMode          bool
+	Verbose          bool
+	MQTTBroker       string
+	MQTTPort         int
+	MQTTUsername     string
+	MQTTPassword     string
+	MQTTTopic        string
+	YamlConfigFile   string      // Path to YAML config file
+	YamlConfig       *YamlConfig // Loaded YAML configuration
 }
 
 // New creates a new configuration with defaults
 func New() *Config {
 	return &Config{
-		Device:     "/dev/ttyUSB0",
-		WebPort:    "8080",
-		WebMode:    false,
-		Verbose:    false,
-		MQTTPort:   1883,
-		MQTTTopic:  "viessmann",
+		Device:    "/dev/ttyUSB0",
+		WebPort:   "8080",
+		WebMode:   false,
+		Verbose:   false,
+		MQTTPort:  1883,
+		MQTTTopic: "viessmann",
 	}
 }
 
@@ -61,16 +62,16 @@ func openConfigFile(filename string) (io.ReadCloser, error) {
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid zip file format, expected 'zipfile.zip:internal/file.txt'")
 		}
-		
+
 		zipPath := parts[0] + ".zip"
 		internalPath := parts[1]
-		
+
 		// Open the zip file
 		zipReader, err := zip.OpenReader(zipPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open zip file %s: %v", zipPath, err)
 		}
-		
+
 		// Find the internal file
 		for _, f := range zipReader.File {
 			if f.Name == internalPath {
@@ -79,16 +80,16 @@ func openConfigFile(filename string) (io.ReadCloser, error) {
 					zipReader.Close()
 					return nil, fmt.Errorf("failed to open file %s in zip %s: %v", internalPath, zipPath, err)
 				}
-				
+
 				// Return a custom ReadCloser that closes both the file and zip reader
 				return &zipFileReader{rc: rc, zipReader: zipReader}, nil
 			}
 		}
-		
+
 		zipReader.Close()
 		return nil, fmt.Errorf("file %s not found in zip %s", internalPath, zipPath)
 	}
-	
+
 	// Regular file
 	return os.Open(filename)
 }
@@ -120,7 +121,7 @@ func ParseConfig(filename string) ([]DataPoint, error) {
 	// Try to detect format by reading first few lines
 	scanner := bufio.NewScanner(file)
 	isV200KW2Format := false
-	
+
 	// Read first few lines to detect format
 	for i := 0; i < 10 && scanner.Scan(); i++ {
 		line := strings.TrimSpace(scanner.Text())
@@ -129,7 +130,7 @@ func ParseConfig(filename string) ([]DataPoint, error) {
 			break
 		}
 	}
-	
+
 	// Reopen file for actual parsing
 	file.Close()
 	file, err = openConfigFile(filename)
@@ -137,7 +138,7 @@ func ParseConfig(filename string) ([]DataPoint, error) {
 		return nil, fmt.Errorf("failed to reopen config file: %v", err)
 	}
 	defer file.Close()
-	
+
 	if isV200KW2Format {
 		return parseV200KW2Config(file)
 	} else {
@@ -154,7 +155,7 @@ func parseSimpleConfig(file io.Reader) ([]DataPoint, error) {
 	for scanner.Scan() {
 		lineNum++
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
 			continue
@@ -164,7 +165,7 @@ func parseSimpleConfig(file io.Reader) ([]DataPoint, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error parsing line %d: %v", lineNum, err)
 		}
-		
+
 		if dp != nil {
 			dataPoints = append(dataPoints, *dp)
 		}
@@ -189,7 +190,7 @@ func parseSimpleConfigLine(line string, lineNum int) (*DataPoint, error) {
 	if !strings.HasPrefix(addrStr, "0x") && !strings.HasPrefix(addrStr, "0X") {
 		return nil, fmt.Errorf("address must be in hex format (0x....)")
 	}
-	
+
 	addr, err := strconv.ParseUint(addrStr[2:], 16, 16)
 	if err != nil {
 		return nil, fmt.Errorf("invalid address format: %v", err)
@@ -240,24 +241,24 @@ func parseSimpleConfigLine(line string, lineNum int) (*DataPoint, error) {
 	return dataPoint, nil
 }
 
-// parseV200KW2Config parses the structured V200KW2 configuration format  
+// parseV200KW2Config parses the structured V200KW2 configuration format
 func parseV200KW2Config(file io.Reader) ([]DataPoint, error) {
 	var dataPoints []DataPoint
 	scanner := bufio.NewScanner(file)
-	
+
 	// Regex to match parameter lines: [InternalName~0xADDR (Type)]
 	paramRegex := regexp.MustCompile(`\[([^~]+)~(0x[0-9A-Fa-f]{4})\s+\(([^)]+)\)\]`)
 	hiddenRegex := regexp.MustCompile(`HIDDEN:\(([^)]+)\)`)
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip empty lines, comments, and section headers
-		if len(line) == 0 || strings.HasPrefix(line, "#") || 
-		   strings.HasPrefix(line, "V200KW2") || strings.HasPrefix(line, "===") {
+		if len(line) == 0 || strings.HasPrefix(line, "#") ||
+			strings.HasPrefix(line, "V200KW2") || strings.HasPrefix(line, "===") {
 			continue
 		}
-		
+
 		// Look for parameter definitions
 		if strings.Contains(line, "[") && strings.Contains(line, "~0x") {
 			matches := paramRegex.FindStringSubmatch(line)
@@ -268,32 +269,32 @@ func parseV200KW2Config(file io.Reader) ([]DataPoint, error) {
 				if err != nil {
 					continue
 				}
-				
+
 				// Extract name from the line (before the bracket)
 				namePart := strings.Split(line, "[")[0]
 				name := strings.TrimSpace(strings.TrimPrefix(namePart, "- "))
-				
+
 				// Clean up name by removing ID numbers in parentheses
 				if idx := strings.Index(name, " ("); idx != -1 {
 					name = strings.TrimSpace(name[:idx])
 				}
-				
+
 				// Determine data type and size
 				dataType := strings.TrimSpace(matches[3])
 				size := getDataTypeSize(dataType)
 				unit := inferUnit(name, dataType)
-				
+
 				// Check for HIDDEN condition
 				hiddenCondition := ""
 				hiddenMatches := hiddenRegex.FindStringSubmatch(line)
 				if len(hiddenMatches) >= 2 {
 					hiddenCondition = hiddenMatches[1]
 				}
-				
+
 				// For now, we'll include all parameters (ignore HIDDEN conditions)
 				// In a full implementation, you'd evaluate the hidden conditions
 				isAvailable := hiddenCondition == "" // Simple heuristic
-				
+
 				if isAvailable || len(dataPoints) < 100 { // Limit to prevent too many params
 					dataPoint := DataPoint{
 						Name:       name,
@@ -303,17 +304,17 @@ func parseV200KW2Config(file io.Reader) ([]DataPoint, error) {
 						Unit:       unit,
 						AliasNames: []string{matches[1]}, // Add internal name as alias
 					}
-					
+
 					dataPoints = append(dataPoints, dataPoint)
 				}
 			}
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %v", err)
 	}
-	
+
 	return dataPoints, nil
 }
 
@@ -336,7 +337,7 @@ func getDataTypeSize(dataType string) int {
 // inferUnit tries to determine the unit based on parameter name and type
 func inferUnit(name, dataType string) string {
 	nameLower := strings.ToLower(name)
-	
+
 	if strings.Contains(nameLower, "temperatur") || strings.Contains(nameLower, "temp") {
 		return "°C"
 	}
@@ -349,6 +350,6 @@ func inferUnit(name, dataType string) string {
 	if strings.Contains(nameLower, "stunden") || strings.Contains(nameLower, "hours") {
 		return "h"
 	}
-	
+
 	return "" // No unit
 }

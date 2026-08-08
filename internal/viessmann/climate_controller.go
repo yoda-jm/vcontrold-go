@@ -18,24 +18,32 @@ type ClimateController struct {
 
 // ClimateCommand represents a climate control command from Home Assistant
 type ClimateCommand struct {
-	Type        string  // "temperature", "mode"
-	Zone        string  // "heating", "hotwater"
-	Value       string  // temperature value or mode string
-	Parameter   string  // specific parameter name if known
-	Address     uint16  // specific address if known
+	Type      string // "temperature", "mode"
+	Zone      string // "heating", "hotwater"
+	Value     string // temperature value or mode string
+	Parameter string // specific parameter name if known
+	Address   uint16 // specific address if known
 }
 
 // NewClimateController creates a new climate controller
 func NewClimateController(reader *Reader) *ClimateController {
+	// Un Reader construit directement, sans passer par NewReader, n'a pas de
+	// journal : le premier appel a cc.logger.Info paniquerait alors sur un
+	// pointeur nul. Le pilotage climatique ne vaut pas un arret du daemon.
+	logger := LoggerInterface(NewNoOpLogger())
+	if reader != nil && reader.logger != nil {
+		logger = reader.logger
+	}
+
 	return &ClimateController{
 		reader: reader,
-		logger: reader.logger,
+		logger: logger,
 	}
 }
 
 // ProcessClimateCommand processes a climate control command
 func (cc *ClimateController) ProcessClimateCommand(command ClimateCommand) error {
-	cc.logger.Info("Processing climate command: Type=%s, Zone=%s, Value=%s", 
+	cc.logger.Info("Processing climate command: Type=%s, Zone=%s, Value=%s",
 		command.Type, command.Zone, command.Value)
 
 	switch command.Type {
@@ -70,7 +78,7 @@ func (cc *ClimateController) setTemperature(command ClimateCommand) error {
 func (cc *ClimateController) setHotWaterTemperature(temperature float64) error {
 	// Validate temperature range for hot water
 	if temperature < 35.0 || temperature > 65.0 {
-		return errors.New(errors.ErrValidation, 
+		return errors.New(errors.ErrValidation,
 			fmt.Sprintf("hot water temperature %.1f°C out of range (35-65°C)", temperature))
 	}
 
@@ -90,8 +98,8 @@ func (cc *ClimateController) setHotWaterTemperature(temperature float64) error {
 			if dp.Address == addr {
 				// Check if this looks like a hot water temperature parameter
 				nameLower := strings.ToLower(dp.Name)
-				if strings.Contains(nameLower, "warmwasser") && 
-				   (strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
+				if strings.Contains(nameLower, "warmwasser") &&
+					(strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
 					targetAddress = addr
 					targetDataPoint = &dp
 					break
@@ -108,7 +116,7 @@ func (cc *ClimateController) setHotWaterTemperature(temperature float64) error {
 		for _, dp := range dataPoints {
 			nameLower := strings.ToLower(dp.Name)
 			if (strings.Contains(nameLower, "warmwasser") || strings.Contains(nameLower, "hot") || strings.Contains(nameLower, "ww")) &&
-			   (strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target") || strings.Contains(nameLower, "setpoint")) {
+				(strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target") || strings.Contains(nameLower, "setpoint")) {
 				targetAddress = dp.Address
 				targetDataPoint = &dp
 				break
@@ -117,27 +125,29 @@ func (cc *ClimateController) setHotWaterTemperature(temperature float64) error {
 	}
 
 	if targetAddress == 0 {
-		return errors.New(errors.ErrNotFound, 
+		return errors.New(errors.ErrNotFound,
 			"hot water temperature setpoint parameter not found in configuration")
 	}
 
-	cc.logger.Info("Setting hot water temperature to %.1f°C using address 0x%04X (%s)", 
+	cc.logger.Info("Setting hot water temperature to %.1f°C using address 0x%04X (%s)",
 		temperature, targetAddress, targetDataPoint.Name)
 
-	// Convert temperature to the format expected by the Viessmann system
-	// Most Viessmann systems expect temperature * 10 as integer (e.g., 45.5°C = 455)
-	tempValue := int(temperature * 10)
-
-	// Create the data to write (little-endian 16-bit integer)
-	writeData := []byte{
-		byte(tempValue & 0xFF),         // Low byte
-		byte((tempValue >> 8) & 0xFF),  // High byte
-	}
+	// La consigne ECS tient sur UN octet, sans facteur. Le XML communautaire :
+	//
+	//	<command name="setTempWWsoll" protocmd="setaddr">
+	//	  <addr>6300</addr> <len>1</len> <unit>ST</unit>
+	//	</command>
+	//
+	// et l'unite ST vaut <calc get="V" set="V"/>. Multiplier par 10 donnerait
+	// 480 pour 48 degres, ce qui ne tient pas dans un octet. C'est l'objet du
+	// correctif amont de fevrier 2023, « setTempWWsoll's length is reportedly
+	// actually 1 ».
+	writeData := []byte{byte(int(temperature + 0.5))}
 
 	// Write the temperature setpoint
 	err := cc.writeParameter(targetAddress, writeData)
 	if err != nil {
-		return errors.Wrap(errors.ErrCommunication, 
+		return errors.Wrap(errors.ErrCommunication,
 			fmt.Sprintf("failed to write hot water temperature %.1f°C", temperature), err)
 	}
 
@@ -149,7 +159,7 @@ func (cc *ClimateController) setHotWaterTemperature(temperature float64) error {
 func (cc *ClimateController) setHeatingTemperature(temperature float64) error {
 	// Validate temperature range for heating
 	if temperature < 10.0 || temperature > 30.0 {
-		return errors.New(errors.ErrValidation, 
+		return errors.New(errors.ErrValidation,
 			fmt.Sprintf("heating temperature %.1f°C out of range (10-30°C)", temperature))
 	}
 
@@ -169,7 +179,7 @@ func (cc *ClimateController) setHeatingTemperature(temperature float64) error {
 			if dp.Address == addr {
 				nameLower := strings.ToLower(dp.Name)
 				if (strings.Contains(nameLower, "raum") || strings.Contains(nameLower, "vorlauf")) &&
-				   (strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
+					(strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
 					targetAddress = addr
 					targetDataPoint = &dp
 					break
@@ -182,11 +192,11 @@ func (cc *ClimateController) setHeatingTemperature(temperature float64) error {
 	}
 
 	if targetAddress == 0 {
-		return errors.New(errors.ErrNotFound, 
+		return errors.New(errors.ErrNotFound,
 			"heating temperature setpoint parameter not found in configuration")
 	}
 
-	cc.logger.Info("Setting heating temperature to %.1f°C using address 0x%04X (%s)", 
+	cc.logger.Info("Setting heating temperature to %.1f°C using address 0x%04X (%s)",
 		temperature, targetAddress, targetDataPoint.Name)
 
 	// Convert temperature (similar format as hot water)
@@ -198,7 +208,7 @@ func (cc *ClimateController) setHeatingTemperature(temperature float64) error {
 
 	err := cc.writeParameter(targetAddress, writeData)
 	if err != nil {
-		return errors.Wrap(errors.ErrCommunication, 
+		return errors.Wrap(errors.ErrCommunication,
 			fmt.Sprintf("failed to write heating temperature %.1f°C", temperature), err)
 	}
 
@@ -209,7 +219,7 @@ func (cc *ClimateController) setHeatingTemperature(temperature float64) error {
 // setMode handles mode setting commands
 func (cc *ClimateController) setMode(command ClimateCommand) error {
 	cc.logger.Info("Setting mode for zone %s to %s", command.Zone, command.Value)
-	
+
 	// Mode setting is more complex and system-specific
 	// This is a placeholder implementation
 	switch command.Zone {
@@ -227,7 +237,7 @@ func (cc *ClimateController) setHotWaterMode(mode string) error {
 	// Hot water mode addresses (system-specific):
 	// 0x6301 - Hot water operating mode
 	modeAddress := uint16(0x6301)
-	
+
 	var modeValue byte
 	switch strings.ToLower(mode) {
 	case "off":
@@ -241,10 +251,10 @@ func (cc *ClimateController) setHotWaterMode(mode string) error {
 	}
 
 	writeData := []byte{modeValue}
-	
+
 	err := cc.writeParameter(modeAddress, writeData)
 	if err != nil {
-		return errors.Wrap(errors.ErrCommunication, 
+		return errors.Wrap(errors.ErrCommunication,
 			fmt.Sprintf("failed to set hot water mode to %s", mode), err)
 	}
 
@@ -257,7 +267,7 @@ func (cc *ClimateController) setHeatingMode(mode string) error {
 	// Heating mode addresses (system-specific):
 	// 0x2323 - Betriebsart A1M1
 	modeAddress := uint16(0x2323)
-	
+
 	var modeValue byte
 	switch strings.ToLower(mode) {
 	case "off":
@@ -273,10 +283,10 @@ func (cc *ClimateController) setHeatingMode(mode string) error {
 	}
 
 	writeData := []byte{modeValue}
-	
+
 	err := cc.writeParameter(modeAddress, writeData)
 	if err != nil {
-		return errors.Wrap(errors.ErrCommunication, 
+		return errors.Wrap(errors.ErrCommunication,
 			fmt.Sprintf("failed to set heating mode to %s", mode), err)
 	}
 
@@ -288,14 +298,14 @@ func (cc *ClimateController) setHeatingMode(mode string) error {
 func (cc *ClimateController) writeParameter(address uint16, data []byte) error {
 	// This requires extending the SerialCommunicator interface to support writing
 	// For now, we'll use the reader's serial communicator interface
-	
+
 	// Check if the serial communicator supports writing
 	if writer, ok := cc.reader.serialComm.(WriterInterface); ok {
 		return writer.WriteToDevice(address, data)
 	}
 
 	// If direct writing is not supported, return an error
-	return errors.New(errors.ErrCommunication, 
+	return errors.New(errors.ErrCommunication,
 		"writing to device not supported by current serial communicator implementation")
 }
 
@@ -307,41 +317,41 @@ type WriterInterface interface {
 // GetAvailableSetpoints returns information about available temperature setpoints
 func (cc *ClimateController) GetAvailableSetpoints() map[string]SetpointInfo {
 	setpoints := make(map[string]SetpointInfo)
-	
+
 	dataPoints := cc.reader.GetDataPoints()
 	for _, dp := range dataPoints {
 		nameLower := strings.ToLower(dp.Name)
-		
+
 		// Identify hot water setpoints
 		if (strings.Contains(nameLower, "warmwasser") || strings.Contains(nameLower, "ww")) &&
-		   (strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
+			(strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
 			setpoints["hotwater"] = SetpointInfo{
-				Name:        dp.Name,
-				Address:     dp.Address,
-				Zone:        "hotwater",
-				MinValue:    35.0,
-				MaxValue:    65.0,
-				Unit:        "°C",
-				Available:   true,
+				Name:      dp.Name,
+				Address:   dp.Address,
+				Zone:      "hotwater",
+				MinValue:  35.0,
+				MaxValue:  65.0,
+				Unit:      "°C",
+				Available: true,
 			}
 		}
-		
+
 		// Identify heating setpoints
 		if (strings.Contains(nameLower, "raum") || strings.Contains(nameLower, "vorlauf")) &&
-		   (strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) &&
-		   !strings.Contains(nameLower, "warmwasser") {
+			(strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) &&
+			!strings.Contains(nameLower, "warmwasser") {
 			setpoints["heating"] = SetpointInfo{
-				Name:        dp.Name,
-				Address:     dp.Address,
-				Zone:        "heating",
-				MinValue:    10.0,
-				MaxValue:    30.0,
-				Unit:        "°C",
-				Available:   true,
+				Name:      dp.Name,
+				Address:   dp.Address,
+				Zone:      "heating",
+				MinValue:  10.0,
+				MaxValue:  30.0,
+				Unit:      "°C",
+				Available: true,
 			}
 		}
 	}
-	
+
 	return setpoints
 }
 

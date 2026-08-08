@@ -1,13 +1,12 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"strings"
-	"testing"
-
+	"flag"
 	"github.com/yourusername/vcontrold-go/internal/config"
 	"github.com/yourusername/vcontrold-go/internal/viessmann"
+	"io"
+	"os"
+	"testing"
 )
 
 // TestParseConfiguration tests the parseConfiguration function
@@ -43,15 +42,24 @@ func TestParseConfiguration(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			name:        "yaml config override",
-			args:        []string{"vcontrold-go", "-yaml-config", "/tmp/test_config.yaml"},
-			setupYAML:   true,
-			yamlContent: `device: "/dev/ttyUSB2"\nwebMode: true\nwebPort: "9090"\nverbose: true`,
-			expectedError: false,
+			// L'ancienne version passait une chaine brute contenant des "\\n"
+			// litteraux, donc une seule ligne : ce YAML n'a jamais pu etre
+			// valide. Les cles sont celles des balises yaml, pas leurs noms Go.
+			name:           "yaml config override",
+			args:           []string{"vcontrold-go", "-yaml-config", "/tmp/test_config.yaml"},
+			setupYAML:      true,
+			yamlContent:    "device: \"/dev/ttyUSB2\"\nweb: true\nweb_port: \"9090\"\nverbose: true\n",
+			expectedDevice: "/dev/ttyUSB2",
+			expectedWeb:    true,
+			expectedError:  false,
 		},
 		{
-			name:          "invalid yaml config",
-			args:          []string{"vcontrold-go", "-yaml-config", "/tmp/nonexistent.yaml"},
+			// Un fichier absent n'est pas une erreur : LoadYamlConfig rend les
+			// valeurs par defaut. Ce qui doit echouer, c'est un YAML illisible.
+			name:          "malformed yaml config",
+			args:          []string{"vcontrold-go", "-yaml-config", "/tmp/test_config.yaml"},
+			setupYAML:     true,
+			yamlContent:   "device: \"/dev/ttyUSB2\"\n  mauvaise: indentation\n\tonglet: interdit\n",
 			expectedError: true,
 		},
 	}
@@ -67,14 +75,14 @@ func TestParseConfiguration(t *testing.T) {
 			// Save original os.Args and restore after test
 			originalArgs := os.Args
 			defer func() { os.Args = originalArgs }()
-			
+
 			// Set test args
 			os.Args = tt.args
 
 			// Reset flag package state
 			resetFlags()
 
-			cfg, singleAddress, err := parseConfiguration()
+			cfg, probe, err := parseConfiguration()
 
 			if tt.expectedError {
 				if err == nil {
@@ -103,8 +111,8 @@ func TestParseConfiguration(t *testing.T) {
 			}
 
 			// Single address should be empty for these tests
-			if singleAddress != "" {
-				t.Errorf("Expected empty single address, got '%s'", singleAddress)
+			if probe.address != "" {
+				t.Errorf("Expected empty single address, got '%s'", probe.address)
 			}
 
 			// Verify default XML paths are set
@@ -121,11 +129,11 @@ func TestParseConfiguration(t *testing.T) {
 // TestInitializeXMLSystems tests the initializeXMLSystems function
 func TestInitializeXMLSystems(t *testing.T) {
 	tests := []struct {
-		name          string
-		vcontrolPath  string
-		vitoPath      string
-		expectError   bool
-		createFiles   bool
+		name         string
+		vcontrolPath string
+		vitoPath     string
+		expectError  bool
+		createFiles  bool
 	}{
 		{
 			name:         "valid XML paths",
@@ -185,23 +193,27 @@ func TestInitializeXMLSystems(t *testing.T) {
 // TestInitializeReader tests the initializeReader function
 func TestInitializeReader(t *testing.T) {
 	tests := []struct {
-		name           string
-		device         string
-		configFile     string
-		expectError    bool
-		setupConfig    bool
-		setupYAML      bool
+		name        string
+		device      string
+		configFile  string
+		expectError bool
+		setupConfig bool
+		setupYAML   bool
 	}{
+		// initializeReader ouvre vraiment le port serie : aucun nom de
+		// peripherique factice ne peut aboutir sans materiel. Ces deux cas
+		// attendaient un succes impossible ; ils verifient desormais que
+		// l'echec est propre et signale.
 		{
-			name:        "mock device without config",
+			name:        "absent device without config",
 			device:      "mock-device",
-			expectError: false,
+			expectError: true,
 		},
 		{
-			name:        "mock device with config",
+			name:        "absent device with config",
 			device:      "mock-device",
 			configFile:  "/tmp/test_config.txt",
-			expectError: false,
+			expectError: true,
 			setupConfig: true,
 		},
 		{
@@ -297,6 +309,13 @@ func TestRunApplication(t *testing.T) {
 			if tt.setupConfig {
 				createTestConfigFile(t, tt.configFile)
 				defer os.Remove(tt.configFile)
+
+				// runApplication ne charge pas la configuration : sans ce
+				// chargement le lecteur factice n'a aucun point de mesure et
+				// le mode CLI echoue sur "no data points configured".
+				if err := reader.LoadConfig(tt.configFile); err != nil {
+					t.Fatalf("Failed to load test config: %v", err)
+				}
 			}
 
 			// For CLI mode testing, we need to handle os.Exit calls
@@ -306,7 +325,7 @@ func TestRunApplication(t *testing.T) {
 				t.Skip("Skipping CLI mode without config test - calls os.Exit")
 			}
 
-			err := runApplication(reader, cfg, tt.singleAddress)
+			err := runApplication(reader, cfg, singleRead{address: tt.singleAddress})
 
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error, got none")
@@ -322,11 +341,11 @@ func TestRunApplication(t *testing.T) {
 // TestRunCLIMode tests the runCLIMode function
 func TestRunCLIMode(t *testing.T) {
 	tests := []struct {
-		name          string
-		configFile    string
-		setupConfig   bool
-		expectError   bool
-		expectExit    bool
+		name        string
+		configFile  string
+		setupConfig bool
+		expectError bool
+		expectExit  bool
 	}{
 		{
 			name:        "with valid config",
@@ -356,7 +375,7 @@ func TestRunCLIMode(t *testing.T) {
 			if tt.setupConfig {
 				createTestConfigFile(t, tt.configFile)
 				defer os.Remove(tt.configFile)
-				
+
 				// Load the config into the reader for testing
 				err := reader.LoadConfig(tt.configFile)
 				if err != nil {
@@ -400,8 +419,8 @@ func createTestYAMLFile(t *testing.T, filePath, content string) {
 
 func createTestConfigFile(t *testing.T, filePath string) {
 	content := `# Test configuration
-Param1,0x1000,2,Int,Test parameter 1
-Param2,0x2000,2,Int,Test parameter 2
+Param1 0x1000 2 Int
+Param2 0x2000 2 Int
 `
 	err := os.WriteFile(filePath, []byte(content), 0644)
 	if err != nil {
@@ -436,9 +455,15 @@ func createTestXMLFiles(t *testing.T, vcontrolPath, vitoPath string) {
 }
 
 // resetFlags resets the flag package state for testing
+// resetFlags redonne un jeu de drapeaux vierge.
+//
+// parseConfiguration enregistre ses drapeaux sur flag.CommandLine : un second
+// appel dans le meme processus paniquait sur "flag redefined". L'ancienne
+// version ne faisait rien, donc le premier sous-test passait et le suivant
+// faisait tomber tout le paquet.
 func resetFlags() {
-	// In a real implementation, you'd need to properly reset the flag package
-	// This is a simplified version for testing
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	flag.CommandLine.SetOutput(io.Discard)
 }
 
 // Benchmark tests for performance monitoring
@@ -461,31 +486,6 @@ func BenchmarkParseConfiguration(b *testing.B) {
 		}
 		if cfg == nil {
 			b.Fatalf("Expected config, got nil")
-		}
-	}
-}
-
-func BenchmarkDeduplicateDataPoints(b *testing.B) {
-	reader := createMockReader(&testing.T{})
-	defer reader.Close()
-
-	// Create test data with duplicates
-	dataPoints := make([]config.DataPoint, 100)
-	for i := 0; i < 100; i++ {
-		dataPoints[i] = config.DataPoint{
-			Name:     fmt.Sprintf("Param%d", i%20), // Create some duplicates
-			Address:  uint16(0x1000 + (i % 20)),   // Duplicate addresses
-			Size:     2,
-			DataType: "Int",
-		}
-	}
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		result := reader.deduplicateDataPoints(dataPoints)
-		if len(result) == 0 {
-			b.Fatalf("Expected deduplicated results, got empty slice")
 		}
 	}
 }
@@ -527,4 +527,3 @@ func TestEdgeCases(t *testing.T) {
 		})
 	}
 }
-

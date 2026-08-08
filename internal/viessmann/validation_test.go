@@ -363,18 +363,18 @@ func TestConfigValidatorWithRealData(t *testing.T) {
 			{Name: "Außentemperatur", Address: 0x5525, Size: 2, DataType: "SInt", Unit: "°C"},
 			{Name: "Kesseltemperatur", Address: 0x0810, Size: 2, DataType: "Int", Unit: "°C"},
 			{Name: "Vorlauftemperatur A1M1", Address: 0x3900, Size: 2, DataType: "Int", Unit: "°C"},
-			
+
 			// Status parameters
 			{Name: "Betriebsart", Address: 0x2323, Size: 1, DataType: "Byte"},
 			{Name: "Brennerstatus", Address: 0x55D3, Size: 1, DataType: "Byte"},
-			
+
 			// Error parameters
 			{Name: "Fehlerstatus", Address: 0x7507, Size: 9, DataType: "Array"},
-			{Name: "Brennerstunden1", Address: 0x08A7, Size: 4, DataType: "CounterS", Unit: "h"},
-			
+			{Name: "Brennerstunden1", Address: 0x08A7, Size: 4, DataType: "Int4", Unit: "h"},
+
 			// Floating point values
 			{Name: "Volumenstrom", Address: 0x7663, Size: 4, DataType: "Float", Unit: "l/h"},
-			
+
 			// String parameters
 			{Name: "Anlagentyp", Address: 0x00F8, Size: 2, DataType: "String"},
 		}
@@ -432,4 +432,3 @@ func TestConfigValidatorPerformance(t *testing.T) {
 		t.Errorf("Validation failed for large dataset: %v", err)
 	}
 }
-

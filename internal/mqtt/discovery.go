@@ -1,0 +1,199 @@
+// Package mqtt - Decouverte Home Assistant
+package mqtt
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"strings"
+
+	"github.com/yourusername/vcontrold-go/internal/config"
+	"github.com/yourusername/vcontrold-go/internal/xml"
+)
+
+// deviceIdentifier regroupe toutes les entites sous un seul appareil dans HA.
+const (
+	deviceIdentifier = "vitola200"
+	deviceName       = "Vitola 200"
+	deviceModel      = "Vitola 200 VB2A / Vitotronic 200 KW2"
+	deviceVendor     = "Viessmann"
+)
+
+// discoveryPayload est le message de configuration attendu par Home Assistant
+// sur homeassistant/sensor/<node>/<objet>/config.
+type discoveryPayload struct {
+	Name              string              `json:"name"`
+	UniqueID          string              `json:"unique_id"`
+	StateTopic        string              `json:"state_topic"`
+	UnitOfMeasurement string              `json:"unit_of_measurement,omitempty"`
+	DeviceClass       string              `json:"device_class,omitempty"`
+	StateClass        string              `json:"state_class,omitempty"`
+	Icon              string              `json:"icon,omitempty"`
+	Device            discoveryDevice     `json:"device"`
+	Availability      []map[string]string `json:"availability,omitempty"`
+}
+
+type discoveryDevice struct {
+	Identifiers  []string `json:"identifiers"`
+	Name         string   `json:"name"`
+	Model        string   `json:"model"`
+	Manufacturer string   `json:"manufacturer"`
+}
+
+// sensorMetadata porte ce que Home Assistant doit savoir d'une mesure.
+type sensorMetadata struct {
+	Unit        string
+	DeviceClass string
+	StateClass  string
+	Icon        string
+}
+
+// metadataForUnit deduit les classes Home Assistant de l'unite vito.xml.
+//
+// state_class est le champ qui compte : sans lui, Home Assistant n'archive pas
+// l'entite dans les statistiques long terme, et l'historique disparait avec la
+// purge du recorder (dix jours par defaut). C'est ce qui a coute un an de
+// releves la derniere fois.
+//
+//	total_increasing -> compteurs qui ne font que monter (heures, demarrages)
+//	measurement      -> grandeurs instantanees (temperatures, etats)
+func metadataForUnit(vitoUnit string) sensorMetadata {
+	switch vitoUnit {
+	case "CS": // CounterS : secondes cumulees, converties en heures (V/3600)
+		return sensorMetadata{
+			Unit:        "h",
+			DeviceClass: "duration",
+			StateClass:  "total_increasing",
+			Icon:        "mdi:timer-outline",
+		}
+	case "CO": // Counter : nombre d'evenements cumules
+		return sensorMetadata{
+			StateClass: "total_increasing",
+			Icon:       "mdi:counter",
+		}
+	case "UT", "UT1", "UT1U", "UTI": // Temperatures
+		return sensorMetadata{
+			Unit:        "°C",
+			DeviceClass: "temperature",
+			StateClass:  "measurement",
+		}
+	case "PR", "PR1": // Pourcentages
+		return sensorMetadata{
+			Unit:       "%",
+			StateClass: "measurement",
+		}
+	case "ST": // Status numerique simple
+		return sensorMetadata{StateClass: "measurement"}
+	case "RT": // ReturnStatus : enum 0/1, marche/arret
+		return sensorMetadata{Icon: "mdi:fire"}
+	case "BA": // BetriebsArt : enum textuel, pas de state_class possible
+		return sensorMetadata{Icon: "mdi:tune"}
+	default:
+		return sensorMetadata{}
+	}
+}
+
+// sanitizeObjectID rend un alias utilisable dans un topic et un unique_id.
+func sanitizeObjectID(alias string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r + ('a' - 'A')
+		case r == '-', r == ' ', r == '.':
+			return '_'
+		default:
+			return -1
+		}
+	}, alias)
+
+	return strings.Trim(cleaned, "_")
+}
+
+// PublishDiscovery publie un message de decouverte RETENU par adresse surveillee.
+//
+// Le flag retain est indispensable : sans lui, Home Assistant perd toutes les
+// entites au premier redemarrage et ne les retrouve qu'au prochain envoi.
+func (p *Publisher) PublishDiscovery() error {
+	if !p.enabled || p.config == nil {
+		return nil
+	}
+	if p.client == nil || !p.client.IsConnected() {
+		return fmt.Errorf("cannot publish discovery: MQTT client not connected")
+	}
+
+	published := 0
+	for _, addr := range p.config.Addresses {
+		hexAddr, err := config.ParseHexAddress(addr.Address)
+		if err != nil {
+			log.Printf("MQTT discovery: skipping invalid address '%s': %v", addr.Address, err)
+			continue
+		}
+
+		alias := addr.Alias
+		if alias == "" {
+			alias = fmt.Sprintf("addr_%04x", hexAddr)
+		}
+		objectID := sanitizeObjectID(alias)
+		if objectID == "" {
+			log.Printf("MQTT discovery: alias '%s' yields an empty object id, skipping", alias)
+			continue
+		}
+
+		// L'unite vito.xml fournit le defaut ; la configuration peut le forcer.
+		meta := sensorMetadata{}
+		if mapping, exists := xml.GetAddressMapping(hexAddr); exists {
+			meta = metadataForUnit(mapping.Unit)
+		}
+		if addr.Unit != "" {
+			meta.Unit = addr.Unit
+		}
+		if addr.DeviceClass != "" {
+			meta.DeviceClass = addr.DeviceClass
+		}
+		if addr.StateClass != "" {
+			meta.StateClass = addr.StateClass
+		}
+
+		friendlyName := addr.FriendlyName
+		if friendlyName == "" {
+			friendlyName = alias
+		}
+
+		payload := discoveryPayload{
+			Name:              friendlyName,
+			UniqueID:          fmt.Sprintf("%s_%s", deviceIdentifier, objectID),
+			StateTopic:        fmt.Sprintf("%s/%s", p.config.TopicRoot, alias),
+			UnitOfMeasurement: meta.Unit,
+			DeviceClass:       meta.DeviceClass,
+			StateClass:        meta.StateClass,
+			Icon:              meta.Icon,
+			Device: discoveryDevice{
+				Identifiers:  []string{deviceIdentifier},
+				Name:         deviceName,
+				Model:        deviceModel,
+				Manufacturer: deviceVendor,
+			},
+		}
+
+		body, err := json.Marshal(payload)
+		if err != nil {
+			log.Printf("MQTT discovery: failed to marshal payload for %s: %v", alias, err)
+			continue
+		}
+
+		topic := fmt.Sprintf("homeassistant/sensor/%s/%s/config", deviceIdentifier, objectID)
+		token := p.client.Publish(topic, 0, true, body) // retain = true
+		if token.Wait() && token.Error() != nil {
+			log.Printf("MQTT discovery: failed to publish %s: %v", topic, token.Error())
+			continue
+		}
+
+		published++
+		log.Printf("MQTT discovery: %s (state_class=%q unit=%q)", topic, meta.StateClass, meta.Unit)
+	}
+
+	log.Printf("MQTT discovery: published %d retained sensor definitions", published)
+	return nil
+}

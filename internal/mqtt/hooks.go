@@ -12,23 +12,24 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/yourusername/vcontrold-go/internal/config"
 	"github.com/yourusername/vcontrold-go/internal/viessmann"
+	"github.com/yourusername/vcontrold-go/internal/xml"
 )
 
 // MQTTHook defines a topic to listen to and what action to execute
 type MQTTHook struct {
-	Topic       string                   `yaml:"topic" json:"topic"`               // MQTT topic to listen to
-	Description string                   `yaml:"description" json:"description"`   // Human readable description
-	Action      config.MQTTHookAction    `yaml:"action" json:"action"`             // Action to execute
-	Enabled     bool                     `yaml:"enabled" json:"enabled"`           // Whether this hook is active
+	Topic       string                `yaml:"topic" json:"topic"`             // MQTT topic to listen to
+	Description string                `yaml:"description" json:"description"` // Human readable description
+	Action      config.MQTTHookAction `yaml:"action" json:"action"`           // Action to execute
+	Enabled     bool                  `yaml:"enabled" json:"enabled"`         // Whether this hook is active
 }
 
 // HookManager manages MQTT topic subscriptions and actions
 type HookManager struct {
-	config     *config.Config
-	reader     *viessmann.Reader
-	client     mqtt.Client
-	hooks      []MQTTHook
-	connected  bool
+	config    *config.Config
+	reader    *viessmann.Reader
+	client    mqtt.Client
+	hooks     []MQTTHook
+	connected bool
 }
 
 // NewHookManager creates a new MQTT hook manager
@@ -44,7 +45,7 @@ func NewHookManager(cfg *config.Config, reader *viessmann.Reader) *HookManager {
 func (hm *HookManager) AddHook(hook MQTTHook) {
 	hm.hooks = append(hm.hooks, hook)
 	log.Printf("MQTT Hook registered: %s -> %s", hook.Topic, hook.Description)
-	
+
 	// Subscribe if already connected
 	if hm.connected && hm.client != nil && hook.Enabled {
 		hm.subscribeToHook(hook)
@@ -55,7 +56,7 @@ func (hm *HookManager) AddHook(hook MQTTHook) {
 func (hm *HookManager) LoadHooks(hooks []MQTTHook) {
 	hm.hooks = hooks
 	log.Printf("MQTT: Loaded %d hooks from configuration", len(hooks))
-	
+
 	// Subscribe to all enabled hooks if connected
 	if hm.connected && hm.client != nil {
 		for _, hook := range hm.hooks {
@@ -72,19 +73,19 @@ func (hm *HookManager) Connect() error {
 	if hm.config.YamlConfig == nil || hm.config.YamlConfig.MQTT.Host == "" {
 		return fmt.Errorf("MQTT broker not configured in YAML config")
 	}
-	
+
 	mqttConfig := hm.config.YamlConfig.MQTT
 	if !mqttConfig.Enabled {
 		return fmt.Errorf("MQTT is disabled in configuration")
 	}
-	
+
 	// Create MQTT client
 	clientID := fmt.Sprintf("vcontrold-hooks-%d", time.Now().Unix())
 	opts := mqtt.NewClientOptions().
 		AddBroker(fmt.Sprintf("tcp://%s", mqttConfig.Host)).
 		SetClientID(clientID).
 		SetCleanSession(true)
-	
+
 	// Set credentials if provided
 	if mqttConfig.Username != "" {
 		opts.SetUsername(mqttConfig.Username)
@@ -92,17 +93,17 @@ func (hm *HookManager) Connect() error {
 			opts.SetPassword(mqttConfig.Password)
 		}
 	}
-	
+
 	// Connection handlers
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
 		log.Printf("MQTT Hooks: Connection lost: %v", err)
 		hm.connected = false
 	})
-	
+
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		log.Printf("MQTT Hooks: Connected to broker %s", mqttConfig.Host)
 		hm.connected = true
-		
+
 		// Subscribe to all enabled hooks
 		for _, hook := range hm.hooks {
 			if hook.Enabled {
@@ -110,13 +111,13 @@ func (hm *HookManager) Connect() error {
 			}
 		}
 	})
-	
+
 	// Connect
 	hm.client = mqtt.NewClient(opts)
 	if token := hm.client.Connect(); token.Wait() && token.Error() != nil {
 		return fmt.Errorf("MQTT hooks connection failed: %v", token.Error())
 	}
-	
+
 	return nil
 }
 
@@ -125,13 +126,13 @@ func (hm *HookManager) subscribeToHook(hook MQTTHook) {
 	if hm.client == nil {
 		return
 	}
-	
+
 	log.Printf("MQTT Hook: Subscribing to %s (%s)", hook.Topic, hook.Description)
-	
+
 	token := hm.client.Subscribe(hook.Topic, 0, func(client mqtt.Client, msg mqtt.Message) {
 		hm.handleHookMessage(hook, msg)
 	})
-	
+
 	if token.Wait() && token.Error() != nil {
 		log.Printf("MQTT Hook: Failed to subscribe to %s: %v", hook.Topic, token.Error())
 	}
@@ -141,11 +142,11 @@ func (hm *HookManager) subscribeToHook(hook MQTTHook) {
 func (hm *HookManager) handleHookMessage(hook MQTTHook, msg mqtt.Message) {
 	payload := string(msg.Payload())
 	log.Printf("MQTT Hook: Received on %s: %s (Action: %s)", hook.Topic, payload, hook.Action.Type)
-	
+
 	// Execute the configured action
 	if err := hm.executeAction(hook.Action, payload); err != nil {
 		log.Printf("MQTT Hook: Failed to execute action %s for topic %s: %v", hook.Action.Type, hook.Topic, err)
-		
+
 		// Optionally publish error status
 		hm.publishHookStatus(hook.Topic+"/error", map[string]interface{}{
 			"error":   err.Error(),
@@ -155,7 +156,7 @@ func (hm *HookManager) handleHookMessage(hook MQTTHook, msg mqtt.Message) {
 		})
 		return
 	}
-	
+
 	// Publish success status
 	hm.publishHookStatus(hook.Topic+"/status", map[string]interface{}{
 		"success": true,
@@ -189,7 +190,7 @@ func (hm *HookManager) executeSetTemperature(action config.MQTTHookAction, paylo
 	if err != nil {
 		return fmt.Errorf("invalid temperature format '%s': %v", payload, err)
 	}
-	
+
 	// Validate range if specified
 	if action.MinValue != nil && temp < *action.MinValue {
 		return fmt.Errorf("temperature %.1f°C below minimum %.1f°C", temp, *action.MinValue)
@@ -197,11 +198,11 @@ func (hm *HookManager) executeSetTemperature(action config.MQTTHookAction, paylo
 	if action.MaxValue != nil && temp > *action.MaxValue {
 		return fmt.Errorf("temperature %.1f°C above maximum %.1f°C", temp, *action.MaxValue)
 	}
-	
+
 	// Find target address
 	var targetAddress uint16
 	var found bool
-	
+
 	if action.Address != "" {
 		// Direct address specified
 		if addr, err := config.ParseHexAddress(action.Address); err == nil {
@@ -212,25 +213,27 @@ func (hm *HookManager) executeSetTemperature(action config.MQTTHookAction, paylo
 		// Find by parameter name or zone
 		targetAddress, found = hm.findTemperatureSetpoint(action.Zone, action.Parameter)
 	}
-	
+
 	if !found {
-		return fmt.Errorf("temperature setpoint not found (zone: %s, parameter: %s, address: %s)", 
+		return fmt.Errorf("temperature setpoint not found (zone: %s, parameter: %s, address: %s)",
 			action.Zone, action.Parameter, action.Address)
 	}
-	
+
 	// Transform value if needed
 	writeValue := temp
 	if action.Transform == "multiply_10" {
 		writeValue = temp * 10
 	}
-	
-	// Prepare data for writing (16-bit little-endian)
-	intValue := int(writeValue)
-	writeData := []byte{
-		byte(intValue & 0xFF),
-		byte((intValue >> 8) & 0xFF),
+
+	// La longueur vient du XML, pas d'une hypothese. setTempWWsoll (0x6300)
+	// fait UN octet, unite ST, sans facteur : ecrire deux octets deborde sur
+	// l'adresse suivante. Ecrire 480 pour 48 degres ne tient meme pas dans un
+	// octet -- d'ou la disparition du transform multiply_10 de la config.
+	writeData, err := encodeLittleEndian(int(writeValue+0.5), writeLengthFor(targetAddress))
+	if err != nil {
+		return fmt.Errorf("cannot encode temperature %.1f°C for address 0x%04X: %v", temp, targetAddress, err)
 	}
-	
+
 	// Write to device
 	if writer, ok := hm.reader.GetSerialComm().(interface{ WriteToDevice(uint16, []byte) error }); ok {
 		err := writer.WriteToDevice(targetAddress, writeData)
@@ -240,18 +243,18 @@ func (hm *HookManager) executeSetTemperature(action config.MQTTHookAction, paylo
 		log.Printf("MQTT Hook: Set temperature to %.1f°C at address 0x%04X", temp, targetAddress)
 		return nil
 	}
-	
+
 	return fmt.Errorf("write operations not supported by current serial communicator")
 }
 
 // executeSetMode handles mode setting actions
 func (hm *HookManager) executeSetMode(action config.MQTTHookAction, payload string) error {
 	mode := strings.ToLower(strings.TrimSpace(payload))
-	
+
 	// Find target address
 	var targetAddress uint16
 	var found bool
-	
+
 	if action.Address != "" {
 		if addr, err := config.ParseHexAddress(action.Address); err == nil {
 			targetAddress = addr
@@ -260,11 +263,11 @@ func (hm *HookManager) executeSetMode(action config.MQTTHookAction, payload stri
 	} else {
 		targetAddress, found = hm.findModeAddress(action.Zone)
 	}
-	
+
 	if !found {
 		return fmt.Errorf("mode address not found for zone: %s", action.Zone)
 	}
-	
+
 	// Map mode to value
 	var modeValue byte
 	switch mode {
@@ -279,7 +282,7 @@ func (hm *HookManager) executeSetMode(action config.MQTTHookAction, payload stri
 	default:
 		return fmt.Errorf("unknown mode: %s", mode)
 	}
-	
+
 	// Write to device
 	writeData := []byte{modeValue}
 	if writer, ok := hm.reader.GetSerialComm().(interface{ WriteToDevice(uint16, []byte) error }); ok {
@@ -290,7 +293,7 @@ func (hm *HookManager) executeSetMode(action config.MQTTHookAction, payload stri
 		log.Printf("MQTT Hook: Set mode to %s at address 0x%04X", mode, targetAddress)
 		return nil
 	}
-	
+
 	return fmt.Errorf("write operations not supported by current serial communicator")
 }
 
@@ -299,33 +302,32 @@ func (hm *HookManager) executeWriteAddress(action config.MQTTHookAction, payload
 	if action.Address == "" {
 		return fmt.Errorf("address required for write_address action")
 	}
-	
+
 	targetAddress, err := config.ParseHexAddress(action.Address)
 	if err != nil {
 		return fmt.Errorf("invalid address %s: %v", action.Address, err)
 	}
-	
+
 	// Parse payload as raw bytes or value
 	var writeData []byte
-	
+
 	// Try to parse as numeric value first
 	if value, err := strconv.ParseFloat(strings.TrimSpace(payload), 64); err == nil {
 		// Transform if needed
 		if action.Transform == "multiply_10" {
 			value *= 10
 		}
-		
-		// Convert to bytes (16-bit little-endian)
-		intValue := int(value)
-		writeData = []byte{
-			byte(intValue & 0xFF),
-			byte((intValue >> 8) & 0xFF),
+
+		// Longueur issue du XML plutot que supposee a deux octets.
+		writeData, err = encodeLittleEndian(int(value+0.5), writeLengthFor(targetAddress))
+		if err != nil {
+			return fmt.Errorf("cannot encode value for address 0x%04X: %v", targetAddress, err)
 		}
 	} else {
 		// Treat as raw string/bytes
 		writeData = []byte(payload)
 	}
-	
+
 	// Write to device
 	if writer, ok := hm.reader.GetSerialComm().(interface{ WriteToDevice(uint16, []byte) error }); ok {
 		err := writer.WriteToDevice(targetAddress, writeData)
@@ -335,7 +337,7 @@ func (hm *HookManager) executeWriteAddress(action config.MQTTHookAction, payload
 		log.Printf("MQTT Hook: Wrote %v to address 0x%04X", writeData, targetAddress)
 		return nil
 	}
-	
+
 	return fmt.Errorf("write operations not supported by current serial communicator")
 }
 
@@ -344,12 +346,12 @@ func (hm *HookManager) executeWriteParameter(action config.MQTTHookAction, paylo
 	if action.Parameter == "" {
 		return fmt.Errorf("parameter name required for write_parameter action")
 	}
-	
+
 	// Find parameter by name
 	dataPoints := hm.reader.GetDataPoints()
 	var targetAddress uint16
 	var found bool
-	
+
 	for _, dp := range dataPoints {
 		if dp.Name == action.Parameter {
 			targetAddress = dp.Address
@@ -357,29 +359,28 @@ func (hm *HookManager) executeWriteParameter(action config.MQTTHookAction, paylo
 			break
 		}
 	}
-	
+
 	if !found {
 		return fmt.Errorf("parameter '%s' not found in configuration", action.Parameter)
 	}
-	
+
 	// Parse and write value (similar to write_address)
 	value, err := strconv.ParseFloat(strings.TrimSpace(payload), 64)
 	if err != nil {
 		return fmt.Errorf("invalid numeric value '%s': %v", payload, err)
 	}
-	
+
 	// Transform if needed
 	if action.Transform == "multiply_10" {
 		value *= 10
 	}
-	
-	// Convert to bytes
-	intValue := int(value)
-	writeData := []byte{
-		byte(intValue & 0xFF),
-		byte((intValue >> 8) & 0xFF),
+
+	// Longueur issue du XML plutot que supposee a deux octets.
+	writeData, err := encodeLittleEndian(int(value+0.5), writeLengthFor(targetAddress))
+	if err != nil {
+		return fmt.Errorf("cannot encode value for parameter '%s' (0x%04X): %v", action.Parameter, targetAddress, err)
 	}
-	
+
 	// Write to device
 	if writer, ok := hm.reader.GetSerialComm().(interface{ WriteToDevice(uint16, []byte) error }); ok {
 		err := writer.WriteToDevice(targetAddress, writeData)
@@ -389,14 +390,14 @@ func (hm *HookManager) executeWriteParameter(action config.MQTTHookAction, paylo
 		log.Printf("MQTT Hook: Wrote %.1f to parameter '%s' (0x%04X)", value, action.Parameter, targetAddress)
 		return nil
 	}
-	
+
 	return fmt.Errorf("write operations not supported by current serial communicator")
 }
 
 // findTemperatureSetpoint finds the address for temperature setpoints by zone or parameter name
 func (hm *HookManager) findTemperatureSetpoint(zone, parameterName string) (uint16, bool) {
 	dataPoints := hm.reader.GetDataPoints()
-	
+
 	// First try exact parameter name match
 	if parameterName != "" {
 		for _, dp := range dataPoints {
@@ -405,28 +406,28 @@ func (hm *HookManager) findTemperatureSetpoint(zone, parameterName string) (uint
 			}
 		}
 	}
-	
+
 	// Then try zone-based matching
 	if zone != "" {
 		for _, dp := range dataPoints {
 			nameLower := strings.ToLower(dp.Name)
-			
+
 			switch zone {
 			case "hotwater":
 				if (strings.Contains(nameLower, "warmwasser") || strings.Contains(nameLower, "ww")) &&
-				   (strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
+					(strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) {
 					return dp.Address, true
 				}
 			case "heating":
 				if (strings.Contains(nameLower, "raum") || strings.Contains(nameLower, "vorlauf")) &&
-				   (strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) &&
-				   !strings.Contains(nameLower, "warmwasser") {
+					(strings.Contains(nameLower, "soll") || strings.Contains(nameLower, "target")) &&
+					!strings.Contains(nameLower, "warmwasser") {
 					return dp.Address, true
 				}
 			}
 		}
 	}
-	
+
 	return 0, false
 }
 
@@ -448,13 +449,13 @@ func (hm *HookManager) publishHookStatus(topic string, payload map[string]interf
 	if hm.client == nil || !hm.connected {
 		return
 	}
-	
+
 	jsonData, err := json.Marshal(map[string]interface{}{"status": payload})
 	if err != nil {
 		log.Printf("MQTT Hook: Failed to create status JSON: %v", err)
 		return
 	}
-	
+
 	token := hm.client.Publish(topic, 0, false, string(jsonData))
 	if token.Wait() && token.Error() != nil {
 		log.Printf("MQTT Hook: Failed to publish status to %s: %v", topic, token.Error())
@@ -474,12 +475,12 @@ func (hm *HookManager) Disconnect() {
 func (hm *HookManager) GetStatus() map[string]interface{} {
 	enabledHooks := 0
 	var hookList []map[string]interface{}
-	
+
 	for _, hook := range hm.hooks {
 		if hook.Enabled {
 			enabledHooks++
 		}
-		
+
 		hookList = append(hookList, map[string]interface{}{
 			"topic":       hook.Topic,
 			"description": hook.Description,
@@ -487,11 +488,46 @@ func (hm *HookManager) GetStatus() map[string]interface{} {
 			"enabled":     hook.Enabled,
 		})
 	}
-	
+
 	return map[string]interface{}{
 		"connected":     hm.connected,
 		"total_hooks":   len(hm.hooks),
 		"enabled_hooks": enabledHooks,
 		"hooks":         hookList,
 	}
+}
+
+// writeLengthFor rend la longueur d'ecriture d'une adresse d'apres vito.xml,
+// surcharges comprises. Un octet par defaut : c'est le cas le plus courant des
+// consignes, et c'est aussi le choix le moins destructeur -- ecrire trop long
+// deborderait sur l'adresse voisine.
+func writeLengthFor(address uint16) int {
+	if mapping, exists := xml.GetAddressMapping(address); exists && mapping.Length > 0 {
+		return mapping.Length
+	}
+	return 1
+}
+
+// encodeLittleEndian encode une valeur entiere sur exactement length octets.
+//
+// Le debordement est une erreur, jamais une troncature silencieuse : ecrire
+// 480 dans un octet donnerait 224, soit une consigne d'eau chaude absurde sur
+// une chaudiere en service.
+func encodeLittleEndian(value int, length int) ([]byte, error) {
+	if length <= 0 || length > 4 {
+		return nil, fmt.Errorf("unsupported write length %d bytes", length)
+	}
+	if value < 0 {
+		return nil, fmt.Errorf("negative value %d cannot be written", value)
+	}
+	if max := (1 << (8 * length)) - 1; value > max {
+		return nil, fmt.Errorf("value %d does not fit in %d byte(s) (max %d)", value, length, max)
+	}
+
+	data := make([]byte, length)
+	for i := 0; i < length; i++ {
+		data[i] = byte((value >> (8 * i)) & 0xFF)
+	}
+
+	return data, nil
 }

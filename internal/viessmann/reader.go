@@ -13,16 +13,16 @@ import (
 
 // Reader handles communication with the Viessmann heating system
 type Reader struct {
-	device            string
-	serialComm        SerialCommunicatorInterface
-	formatter         ValueFormatterInterface
-	decoder           ValueDecoderInterface
-	cache             ParameterCacheInterface
-	autoRefresher     AutoRefresherInterface
-	multiRefresher    MultiGroupRefresherInterface
-	logger            LoggerInterface
-	metrics           MetricsInterface
-	dataPoints        []config.DataPoint
+	device         string
+	serialComm     SerialCommunicatorInterface
+	formatter      ValueFormatterInterface
+	decoder        ValueDecoderInterface
+	cache          ParameterCacheInterface
+	autoRefresher  AutoRefresherInterface
+	multiRefresher MultiGroupRefresherInterface
+	logger         LoggerInterface
+	metrics        MetricsInterface
+	dataPoints     []config.DataPoint
 }
 
 // Reading represents a parameter reading with metadata
@@ -58,32 +58,32 @@ func NewReader(device string) (*Reader, error) {
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrConfig, "failed to create reader config", err)
 	}
-	
+
 	reader := NewReaderWithDependencies(config)
 	reader.logger.Info("Reader created with device: %s", device)
-	
+
 	return reader, nil
 }
 
 // LoadConfig loads data points from a configuration file
 func (r *Reader) LoadConfig(configFile string) error {
 	r.logger.Info("Loading configuration from: %s", configFile)
-	
+
 	dataPoints, err := r.parseAndValidateConfig(configFile)
 	if err != nil {
 		return err
 	}
-	
+
 	r.dataPoints = dataPoints
-	
+
 	// Add XML-only parameters if available
 	if err := r.addXMLOnlyParameters(); err != nil {
 		return errors.Wrap(errors.ErrConfig, "failed to add XML-only parameters", err)
 	}
-	
+
 	// Final deduplication pass
 	r.dataPoints = r.deduplicateDataPoints(r.dataPoints)
-	
+
 	r.logger.Info("Loaded %d data points from configuration", len(r.dataPoints))
 	return nil
 }
@@ -103,14 +103,14 @@ func (r *Reader) ReadAll() ([]Reading, error) {
 	if len(r.dataPoints) == 0 {
 		return nil, errors.New(errors.ErrConfig, "no data points configured")
 	}
-	
+
 	var readings []Reading
-	
+
 	for i, dp := range r.dataPoints {
 		reading := r.ReadParameter(dp, i)
 		readings = append(readings, reading)
 	}
-	
+
 	return readings, nil
 }
 
@@ -118,7 +118,7 @@ func (r *Reader) ReadAll() ([]Reading, error) {
 func (r *Reader) ReadParameter(dp config.DataPoint, index int) Reading {
 	startTime := time.Now()
 	r.logger.Debug("Reading parameter %s at address 0x%04X", dp.Name, dp.Address)
-	
+
 	reading := Reading{
 		Name:      dp.Name,
 		Address:   dp.Address,
@@ -127,14 +127,14 @@ func (r *Reader) ReadParameter(dp config.DataPoint, index int) Reading {
 		Timestamp: time.Now(),
 		Success:   false,
 	}
-	
+
 	// Get detailed unit info
 	unitInfo := xml.GetDetailedUnitInfo(dp.Address, dp.Name)
 	reading.InXML = unitInfo.FoundInXML
 	reading.UnitType = unitInfo.UnitType
 	reading.UnitSource = unitInfo.Source
 	reading.VitoUnit = unitInfo.VitoUnit
-	
+
 	// Try up to 2 attempts for each datapoint like original
 	var lastErr error
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -147,43 +147,43 @@ func (r *Reader) ReadParameter(dp config.DataPoint, index int) Reading {
 				r.logger.Warn("Read attempt %d returned error pattern for %s", attempt, dp.Name)
 				continue // Try again or fail
 			}
-			
+
 			// Success!
 			reading.RawValue = rawValue
 			reading.Success = true
 			reading.FormattedValue = r.formatter.FormatValueWithAllSources(rawValue, dp.DataType, dp.Name, dp.Address)
-			
+
 			// Record metrics
 			r.metrics.IncrementReadCount()
 			r.metrics.RecordReadLatency(time.Since(startTime))
-			
+
 			// Store in cache
 			r.cache.Set(dp.Address, reading)
-			
+
 			r.logger.Debug("Successfully read %s: %s", dp.Name, reading.FormattedValue)
 			return reading
 		}
-		
+
 		lastErr = err
 		r.logger.Warn("Read attempt %d failed for %s: %v", attempt, dp.Name, err)
-		
+
 		// Small delay before retry (like original)
 		if attempt < 2 {
 			time.Sleep(protocol.KW2_RETRY_DELAY_MS * time.Millisecond)
 		}
 	}
-	
+
 	// Both attempts failed
 	reading.Error = fmt.Sprintf("Read error: %v", lastErr)
 	reading.FormattedValue = fmt.Sprintf("ERROR: %v", lastErr)
-	
+
 	// Record error metrics
 	r.metrics.IncrementErrorCount()
 	r.metrics.RecordReadLatency(time.Since(startTime))
-	
+
 	// Store failed reading in cache too
 	r.cache.Set(dp.Address, reading)
-	
+
 	r.logger.Error("Failed to read parameter %s after 2 attempts: %v", dp.Name, lastErr)
 	return reading
 }
@@ -218,24 +218,24 @@ func (r *Reader) SetupAutoRefresh(autoConfig *config.AutoRefreshConfig) error {
 	if autoConfig == nil {
 		return errors.New(errors.ErrValidation, "auto refresh config cannot be nil")
 	}
-	
+
 	// Stop existing auto refresher if running
 	if r.autoRefresher != nil {
 		r.autoRefresher.Stop()
 	}
-	
+
 	// Create new auto refresher
 	var err error
 	r.autoRefresher, err = NewAutoRefresher(r, autoConfig)
 	if err != nil {
 		return errors.Wrap(errors.ErrConfig, "failed to create auto refresher", err)
 	}
-	
+
 	// Start if enabled
 	if autoConfig.Enabled {
 		return r.autoRefresher.Start()
 	}
-	
+
 	return nil
 }
 
@@ -247,7 +247,7 @@ func (r *Reader) GetAutoRefreshStatus() map[string]interface{} {
 			"running": false,
 		}
 	}
-	
+
 	return r.autoRefresher.GetStatus()
 }
 
@@ -256,7 +256,7 @@ func (r *Reader) UpdateAutoRefreshConfig(newConfig *config.AutoRefreshConfig) er
 	if r.autoRefresher == nil {
 		return r.SetupAutoRefresh(newConfig)
 	}
-	
+
 	return r.autoRefresher.UpdateConfig(newConfig)
 }
 
@@ -266,19 +266,19 @@ func (r *Reader) SetupMultiGroupRefresh(groups []config.RefreshGroup) error {
 	if r.multiRefresher != nil {
 		r.multiRefresher.Stop()
 	}
-	
+
 	if len(groups) == 0 {
 		r.multiRefresher = nil
 		return nil
 	}
-	
+
 	// Create new multi refresher
 	var err error
 	r.multiRefresher, err = NewMultiGroupRefresher(r, groups)
 	if err != nil {
 		return errors.Wrap(errors.ErrConfig, "failed to create multi-group refresher", err)
 	}
-	
+
 	// Start refresher
 	return r.multiRefresher.Start()
 }
@@ -294,7 +294,7 @@ func (r *Reader) GetMultiGroupRefreshStatus() map[string]interface{} {
 			"groups":          []interface{}{},
 		}
 	}
-	
+
 	return r.multiRefresher.GetStatus()
 }
 
@@ -303,7 +303,7 @@ func (r *Reader) UpdateMultiGroupRefresh(newGroups []config.RefreshGroup) error 
 	if r.multiRefresher == nil {
 		return r.SetupMultiGroupRefresh(newGroups)
 	}
-	
+
 	return r.multiRefresher.UpdateGroups(newGroups)
 }
 
@@ -327,12 +327,12 @@ func (r *Reader) Close() error {
 	if r.autoRefresher != nil {
 		r.autoRefresher.Stop()
 	}
-	
+
 	// Stop multi-group refresh
 	if r.multiRefresher != nil {
 		r.multiRefresher.Stop()
 	}
-	
+
 	// Close serial communicator
 	if r.serialComm != nil {
 		return r.serialComm.Close()
@@ -346,13 +346,13 @@ func (r *Reader) parseAndValidateConfig(configFile string) ([]config.DataPoint, 
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrParsing, "failed to parse config", err)
 	}
-	
+
 	// Validate the loaded configuration
 	validator := NewConfigValidator(r.logger)
 	if err := validator.ValidateDataPoints(dataPoints); err != nil {
 		return nil, errors.Wrap(errors.ErrValidation, "configuration validation failed", err)
 	}
-	
+
 	return dataPoints, nil
 }
 
@@ -361,32 +361,32 @@ func (r *Reader) addXMLOnlyParameters() error {
 	if len(r.dataPoints) == 0 {
 		return nil
 	}
-	
+
 	existingAddresses := make(map[uint16]bool)
 	for _, dp := range r.dataPoints {
 		existingAddresses[dp.Address] = true
 	}
-	
+
 	xmlOnlyParams := xml.GetXMLOnlyParameters(existingAddresses)
 	if len(xmlOnlyParams) == 0 {
 		return nil
 	}
-	
+
 	r.logger.Info("Adding %d XML-only parameters (ErrorState, CycleTime, etc.)", len(xmlOnlyParams))
-	
+
 	for _, xmlParam := range xmlOnlyParams {
 		// Double-check address doesn't already exist (safety net)
 		if existingAddresses[xmlParam.Address] {
 			continue
 		}
-		
+
 		name, dataType := r.createXMLParameterInfo(xmlParam)
 		if name == "" {
 			continue // Skip unsupported parameter types
 		}
-		
+
 		aliases := r.createXMLParameterAliases(xmlParam)
-		
+
 		xmlOnlyDP := config.DataPoint{
 			Name:       name,
 			Address:    xmlParam.Address,
@@ -395,18 +395,18 @@ func (r *Reader) addXMLOnlyParameters() error {
 			Unit:       "", // Will be determined by XML system
 			AliasNames: aliases,
 		}
-		
+
 		r.dataPoints = append(r.dataPoints, xmlOnlyDP)
 		existingAddresses[xmlParam.Address] = true
 	}
-	
+
 	return nil
 }
 
 // createXMLParameterInfo creates name and data type for XML parameter
 func (r *Reader) createXMLParameterInfo(xmlParam xml.AddressMappingEntry) (string, string) {
 	var name, dataType string
-	
+
 	switch xmlParam.Unit {
 	case "CT":
 		name = fmt.Sprintf("CycleTime 0x%04X", xmlParam.Address)
@@ -416,17 +416,28 @@ func (r *Reader) createXMLParameterInfo(xmlParam xml.AddressMappingEntry) (strin
 			dataType = "Array"
 			// Map specific error history addresses to descriptive names
 			switch xmlParam.Address {
-			case 0x7507: name = "Error History Entry 1"
-			case 0x7510: name = "Error History Entry 2"
-			case 0x7519: name = "Error History Entry 3"
-			case 0x7522: name = "Error History Entry 4"
-			case 0x752B: name = "Error History Entry 5"
-			case 0x7534: name = "Error History Entry 6"
-			case 0x753D: name = "Error History Entry 7"
-			case 0x7546: name = "Error History Entry 8"
-			case 0x754F: name = "Error History Entry 9"
-			case 0x7558: name = "Error History Entry 10"
-			default: name = fmt.Sprintf("Error History 0x%04X", xmlParam.Address)
+			case 0x7507:
+				name = "Error History Entry 1"
+			case 0x7510:
+				name = "Error History Entry 2"
+			case 0x7519:
+				name = "Error History Entry 3"
+			case 0x7522:
+				name = "Error History Entry 4"
+			case 0x752B:
+				name = "Error History Entry 5"
+			case 0x7534:
+				name = "Error History Entry 6"
+			case 0x753D:
+				name = "Error History Entry 7"
+			case 0x7546:
+				name = "Error History Entry 8"
+			case 0x754F:
+				name = "Error History Entry 9"
+			case 0x7558:
+				name = "Error History Entry 10"
+			default:
+				name = fmt.Sprintf("Error History 0x%04X", xmlParam.Address)
 			}
 		} else {
 			dataType = "Byte"
@@ -441,23 +452,23 @@ func (r *Reader) createXMLParameterInfo(xmlParam xml.AddressMappingEntry) (strin
 	default:
 		return "", "" // Unsupported parameter type
 	}
-	
+
 	// Use description from vito.xml if available
 	if xmlParam.Description != "" {
 		name = fmt.Sprintf("%s (0x%04X)", xmlParam.Description, xmlParam.Address)
 	}
-	
+
 	return name, dataType
 }
 
 // createXMLParameterAliases creates aliases for XML parameters
 func (r *Reader) createXMLParameterAliases(xmlParam xml.AddressMappingEntry) []string {
 	var aliases []string
-	
+
 	if xmlParam.Description != "" {
 		aliases = append(aliases, xmlParam.Description)
 	}
-	
+
 	// Add unit type as alias if it's meaningful
 	switch xmlParam.Unit {
 	case "CT":
@@ -475,7 +486,7 @@ func (r *Reader) createXMLParameterAliases(xmlParam xml.AddressMappingEntry) []s
 	case "ESG":
 		aliases = append(aliases, "StatusGroup", "Statusgruppe")
 	}
-	
+
 	return aliases
 }
 
@@ -483,21 +494,21 @@ func (r *Reader) createXMLParameterAliases(xmlParam xml.AddressMappingEntry) []s
 func (r *Reader) deduplicateDataPoints(dataPoints []config.DataPoint) []config.DataPoint {
 	seen := make(map[uint16]int)
 	var deduplicatedDataPoints []config.DataPoint
-	
+
 	for i, dp := range dataPoints {
 		if firstIndex, exists := seen[dp.Address]; exists {
-			r.logger.Warn("Duplicate address 0x%04X found - keeping '%s' (index %d) and removing '%s' (index %d)", 
+			r.logger.Warn("Duplicate address 0x%04X found - keeping '%s' (index %d) and removing '%s' (index %d)",
 				dp.Address, dataPoints[firstIndex].Name, firstIndex, dp.Name, i)
 			continue
 		}
 		seen[dp.Address] = len(deduplicatedDataPoints)
 		deduplicatedDataPoints = append(deduplicatedDataPoints, dp)
 	}
-	
+
 	if len(deduplicatedDataPoints) != len(dataPoints) {
-		r.logger.Info("Removed %d duplicate parameters, %d unique parameters remain", 
+		r.logger.Info("Removed %d duplicate parameters, %d unique parameters remain",
 			len(dataPoints)-len(deduplicatedDataPoints), len(deduplicatedDataPoints))
 	}
-	
+
 	return deduplicatedDataPoints
 }

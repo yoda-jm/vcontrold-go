@@ -3,13 +3,13 @@ package viessmann
 
 // ReaderConfig holds all dependencies and configuration for Reader creation
 type ReaderConfig struct {
-	Device       string
-	SerialComm   SerialCommunicatorInterface
-	Formatter    ValueFormatterInterface
-	Decoder      ValueDecoderInterface
-	Cache        ParameterCacheInterface
-	Logger       LoggerInterface
-	Metrics      MetricsInterface
+	Device     string
+	SerialComm SerialCommunicatorInterface
+	Formatter  ValueFormatterInterface
+	Decoder    ValueDecoderInterface
+	Cache      ParameterCacheInterface
+	Logger     LoggerInterface
+	Metrics    MetricsInterface
 }
 
 // NewReaderWithDependencies creates a Reader with injected dependencies
@@ -32,7 +32,7 @@ func NewDefaultReaderConfig(device string) (*ReaderConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &ReaderConfig{
 		Device:     device,
 		SerialComm: serialComm,

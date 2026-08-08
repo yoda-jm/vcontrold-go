@@ -18,7 +18,7 @@ func TestClimateController_ProcessClimateCommand(t *testing.T) {
 			{Name: "Raumtemperatur Normal Sollwert A1M1", Address: 0x2306, DataType: "short", Unit: "°C"},
 		},
 	}
-	
+
 	controller := NewClimateController(reader)
 
 	tests := []struct {
@@ -40,7 +40,7 @@ func TestClimateController_ProcessClimateCommand(t *testing.T) {
 		{
 			name: "Set hot water temperature - out of range",
 			command: ClimateCommand{
-				Type:  "temperature", 
+				Type:  "temperature",
 				Zone:  "hotwater",
 				Value: "70.0",
 			},
@@ -51,7 +51,7 @@ func TestClimateController_ProcessClimateCommand(t *testing.T) {
 			name: "Set heating temperature - valid",
 			command: ClimateCommand{
 				Type:  "temperature",
-				Zone:  "heating", 
+				Zone:  "heating",
 				Value: "20.5",
 			},
 			expectError: false,
@@ -92,7 +92,7 @@ func TestClimateController_ProcessClimateCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := controller.ProcessClimateCommand(tt.command)
-			
+
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error but got none for test: %s", tt.description)
 			}
@@ -128,7 +128,7 @@ func TestClimateController_GetAvailableSetpoints(t *testing.T) {
 			t.Errorf("Hot water setpoint address: expected 0x6300, got 0x%04X", hotwater.Address)
 		}
 		if hotwater.MinValue != 35.0 || hotwater.MaxValue != 65.0 {
-			t.Errorf("Hot water setpoint range: expected 35-65°C, got %.1f-%.1f°C", 
+			t.Errorf("Hot water setpoint range: expected 35-65°C, got %.1f-%.1f°C",
 				hotwater.MinValue, hotwater.MaxValue)
 		}
 	} else {
@@ -141,7 +141,7 @@ func TestClimateController_GetAvailableSetpoints(t *testing.T) {
 			t.Errorf("Heating setpoint address: expected 0x2306, got 0x%04X", heating.Address)
 		}
 		if heating.MinValue != 10.0 || heating.MaxValue != 30.0 {
-			t.Errorf("Heating setpoint range: expected 10-30°C, got %.1f-%.1f°C", 
+			t.Errorf("Heating setpoint range: expected 10-30°C, got %.1f-%.1f°C",
 				heating.MinValue, heating.MaxValue)
 		}
 	} else {
@@ -167,7 +167,7 @@ func TestClimateController_WriteParameterError(t *testing.T) {
 	// This should fail due to the mock write error
 	command := ClimateCommand{
 		Type:  "temperature",
-		Zone:  "hotwater", 
+		Zone:  "hotwater",
 		Value: "45.0",
 	}
 

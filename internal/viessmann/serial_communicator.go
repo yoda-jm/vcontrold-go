@@ -17,6 +17,30 @@ type SerialCommunicator struct {
 	port   serial.Port
 	mutex  sync.Mutex
 	device string
+
+	// lastTransaction date la fin de la derniere transaction, pour imposer un
+	// repos avant la suivante. Protege par mutex.
+	lastTransaction time.Time
+}
+
+// settle attend que la regulation soit prete a reprendre une sequence SYNC.
+//
+// Le mutex rend chaque transaction atomique, mais pas espacee : plusieurs
+// groupes de rafraichissement tournent en parallele et se relaient sur le port
+// sans repos. La regulation perd alors la synchronisation et cesse d'emettre
+// son 05, ce qui fait echouer la transaction suivante -- systematiquement la
+// meme, celle du groupe qui arrive en second.
+//
+// A appeler mutex tenu.
+func (sc *SerialCommunicator) settle() {
+	if sc.lastTransaction.IsZero() {
+		return
+	}
+
+	elapsed := time.Since(sc.lastTransaction)
+	if wait := protocol.KW2_SETTLE_DELAY_MS*time.Millisecond - elapsed; wait > 0 {
+		time.Sleep(wait)
+	}
 }
 
 // NewSerialCommunicator creates a new serial communicator for the given device
@@ -24,11 +48,11 @@ func NewSerialCommunicator(device string) (*SerialCommunicator, error) {
 	comm := &SerialCommunicator{
 		device: device,
 	}
-	
+
 	if err := comm.initializePort(); err != nil {
 		return nil, errors.Wrap(errors.ErrCommunication, "failed to initialize serial port", err)
 	}
-	
+
 	return comm, nil
 }
 
@@ -40,12 +64,12 @@ func (sc *SerialCommunicator) initializePort() error {
 		DataBits: protocol.KW2_DATA_BITS,
 		StopBits: protocol.KW2_STOP_BITS,
 	}
-	
+
 	port, err := serial.Open(sc.device, mode)
 	if err != nil {
 		return errors.Wrap(errors.ErrCommunication, fmt.Sprintf("failed to open serial port %s", sc.device), err)
 	}
-	
+
 	sc.port = port
 	return nil
 }
@@ -54,17 +78,20 @@ func (sc *SerialCommunicator) initializePort() error {
 func (sc *SerialCommunicator) ReadFromDevice(address uint16, size int) ([]byte, error) {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
-	
+
+	sc.settle()
+	defer func() { sc.lastTransaction = time.Now() }()
+
 	// Prepare serial communication
 	if err := sc.clearSerialBuffers(); err != nil {
 		return nil, err
 	}
-	
+
 	// Send reset and wait for acknowledgment
 	if err := sc.sendResetAndWaitForAck(); err != nil {
 		return nil, err
 	}
-	
+
 	// Send read command and get response
 	return sc.sendReadCommandAndGetResponse(address, size)
 }
@@ -73,17 +100,20 @@ func (sc *SerialCommunicator) ReadFromDevice(address uint16, size int) ([]byte, 
 func (sc *SerialCommunicator) WriteToDevice(address uint16, data []byte) error {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
-	
+
+	sc.settle()
+	defer func() { sc.lastTransaction = time.Now() }()
+
 	// Prepare serial communication
 	if err := sc.clearSerialBuffers(); err != nil {
 		return err
 	}
-	
+
 	// Send reset and wait for acknowledgment
 	if err := sc.sendResetAndWaitForAck(); err != nil {
 		return err
 	}
-	
+
 	// Send write command
 	return sc.sendWriteCommand(address, data)
 }
@@ -109,36 +139,36 @@ func (sc *SerialCommunicator) sendResetAndWaitForAck() error {
 	if err := sc.writeByte(protocol.KW2_RESET_CMD); err != nil {
 		return err
 	}
-	
+
 	// Wait for acknowledgment
 	resetResponse, err := sc.readNBytes(1)
 	if err != nil {
 		return err
 	}
-	
+
 	if resetResponse[0] != protocol.KW2_ACK_RESPONSE {
-		return errors.New(errors.ErrProtocol, fmt.Sprintf("invalid reset response received, expected 0x%02X, got 0x%02X", 
+		return errors.New(errors.ErrProtocol, fmt.Sprintf("invalid reset response received, expected 0x%02X, got 0x%02X",
 			protocol.KW2_ACK_RESPONSE, resetResponse[0]))
 	}
-	
+
 	return nil
 }
 
 // sendReadCommandAndGetResponse sends KW2 read command and returns the response data
 func (sc *SerialCommunicator) sendReadCommandAndGetResponse(address uint16, size int) ([]byte, error) {
-	// Build and send command
+	// Macro GETADDR : SEND 01 F7, puis $addr $hexlen.
 	command := []byte{
 		protocol.KW2_START_BYTE,
-		protocol.KW2_CHECKSUM_INIT,
+		protocol.KW2_CMD_READ,
 		byte(address >> 8),
 		byte(address & 0xFF),
 		byte(size),
 	}
-	
+
 	if err := sc.writeBytes(command); err != nil {
 		return nil, err
 	}
-	
+
 	// Read response
 	return sc.readNBytes(uint64(size))
 }
@@ -161,32 +191,54 @@ func (sc *SerialCommunicator) writeBytes(bytes []byte) error {
 	return nil
 }
 
-// readNBytes reads exactly n bytes from the serial port with timeout
+// readNBytes reads exactly n bytes from the serial port.
+//
+// Deux garde-fous, car une chaudiere muette ne produit ni octet ni erreur :
+// port.Read rend alors 0 sans erreur. Sans bornes, la boucle tourne
+// indefiniment en tenant le mutex du communicateur, et tout le daemon se fige.
 func (sc *SerialCommunicator) readNBytes(n uint64) ([]byte, error) {
 	response := make([]byte, n)
 	var offset uint64
-	
-	// Set read timeout
-	if setter, ok := sc.port.(interface{ SetReadTimeout(time.Duration) error }); ok {
-		setter.SetReadTimeout(protocol.KW2_READ_TIMEOUT_MS * time.Millisecond)
+
+	// Sans timeout applique, Read bloque sans fin : c'est une erreur, pas un
+	// cas a ignorer silencieusement.
+	setter, ok := sc.port.(interface{ SetReadTimeout(time.Duration) error })
+	if !ok {
+		return nil, errors.New(errors.ErrCommunication,
+			"serial port does not support read timeouts; refusing to read without a deadline")
 	}
-	
+	if err := setter.SetReadTimeout(protocol.KW2_READ_TIMEOUT_MS * time.Millisecond); err != nil {
+		return nil, errors.Wrap(errors.ErrCommunication, "failed to set read timeout", err)
+	}
+
+	// Une echeance, et elle seule. Compter les lectures vides serait plus
+	// severe qu'il n'y parait : la regulation n'emet son 05 de synchronisation
+	// que par intermittence, et deux ou trois lectures vides d'affilee sont
+	// normales avant qu'elle ne reponde. C'est la duree totale qui doit borner,
+	// pas le nombre de tentatives.
+	deadline := time.Now().Add(protocol.KW2_READ_DEADLINE_MS * time.Millisecond)
+
 	for offset < n {
 		readBytes, err := sc.port.Read(response[offset:])
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCommunication, "failed to read", err)
 		}
-		
+
 		if readBytes == 0 {
-			continue // Timeout, try again
+			if time.Now().After(deadline) {
+				return nil, errors.New(errors.ErrCommunication,
+					fmt.Sprintf("read timed out after %s: got %d of %d bytes",
+						protocol.KW2_READ_DEADLINE_MS*time.Millisecond, offset, n))
+			}
+			continue
 		}
-		
+
 		offset += uint64(readBytes)
 		if offset > n {
 			return nil, errors.New(errors.ErrProtocol, fmt.Sprintf("read overrun: expected %d bytes, got %d total", n, offset))
 		}
 	}
-	
+
 	return response, nil
 }
 
@@ -203,52 +255,51 @@ func (sc *SerialCommunicator) GetDevice() string {
 	return sc.device
 }
 
-// sendWriteCommand sends a KW2 protocol write command
+// sendWriteCommand sends a KW2 protocol write command.
+//
+// Trame conforme a la commande setaddr du XML communautaire :
+//
+//	<command name="setaddr">
+//	  <send>SYNC;SETADDR $addr $hexlen;SEND BYTES $unit;RECV 1 SR</send>
+//	</command>
+//
+// soit : 01 F4 <adr_hi> <adr_lo> <len> <donnees...>, puis un octet de statut.
+// Le KW ne porte AUCUN checksum -- c'est une particularite du P300. La reponse
+// est un SetReturnStatus (unite SR) : 00 = OK, 05 = SYNC (NOT OK).
 func (sc *SerialCommunicator) sendWriteCommand(address uint16, data []byte) error {
-	// KW2 Write Command Format:
-	// START_BYTE + Command(0x01) + Address_High + Address_Low + Length + Data + Checksum
-	
 	dataLength := len(data)
+	if dataLength == 0 {
+		return errors.New(errors.ErrValidation, "write data cannot be empty")
+	}
 	if dataLength > protocol.KW2_MAX_DATA_SIZE {
-		return errors.New(errors.ErrValidation, 
+		return errors.New(errors.ErrValidation,
 			fmt.Sprintf("write data too large: %d bytes (max %d)", dataLength, protocol.KW2_MAX_DATA_SIZE))
 	}
-	
-	// Build write command
+
 	command := []byte{
-		protocol.KW2_START_BYTE,           // Start byte (0x01)
-		0x01,                              // Write command
-		byte((address >> 8) & 0xFF),      // Address high byte
-		byte(address & 0xFF),             // Address low byte  
-		byte(dataLength),                 // Data length
+		protocol.KW2_START_BYTE,     // 01
+		protocol.KW2_CMD_WRITE,      // F4 -- macro SETADDR
+		byte((address >> 8) & 0xFF), // adresse, octet de poids fort
+		byte(address & 0xFF),        // adresse, octet de poids faible
+		byte(dataLength),            // $hexlen
 	}
-	
-	// Add data bytes
-	command = append(command, data...)
-	
-	// Calculate checksum (XOR of all bytes after start byte, initialized with 0xF7)
-	checksum := byte(protocol.KW2_CHECKSUM_INIT)
-	for i := 1; i < len(command); i++ {
-		checksum ^= command[i]
-	}
-	command = append(command, checksum)
-	
-	// Send the write command
+	command = append(command, data...) // SEND BYTES
+
 	if err := sc.writeBytes(command); err != nil {
 		return errors.Wrap(errors.ErrCommunication, "failed to send write command", err)
 	}
-	
-	// Wait for acknowledgment
-	ackResponse, err := sc.readNBytes(1)
+
+	// RECV 1 SR
+	statusResponse, err := sc.readNBytes(1)
 	if err != nil {
-		return errors.Wrap(errors.ErrCommunication, "failed to read write acknowledgment", err)
+		return errors.Wrap(errors.ErrCommunication, "failed to read write status", err)
 	}
-	
-	if ackResponse[0] != protocol.KW2_ACK_RESPONSE {
-		return errors.New(errors.ErrProtocol, 
-			fmt.Sprintf("invalid write acknowledgment: expected 0x%02X, got 0x%02X", 
-				protocol.KW2_ACK_RESPONSE, ackResponse[0]))
+
+	if statusResponse[0] != protocol.KW2_STATUS_SUCCESS {
+		return errors.New(errors.ErrProtocol,
+			fmt.Sprintf("write rejected at 0x%04X: status 0x%02X (expected 0x%02X = OK)",
+				address, statusResponse[0], protocol.KW2_STATUS_SUCCESS))
 	}
-	
+
 	return nil
 }

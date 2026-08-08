@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Surcharges d'adresses propres a CETTE machine :
+  Viessmann Vitola 200 VB2A / regulation Vitotronic 200 KW2.
+
+  vito.xml decrit une famille d'appareils, pas un exemplaire. Ce fichier
+  applique par-dessus, sans jamais le modifier : `make deps` peut remonter les
+  XML communautaires sans rien perdre de ce qui est constate ici.
+
+  Grammaire identique a vito.xml. Seuls les champs presents sont surcharges.
+  Toute entree doit citer la mesure qui la justifie : pas de valeur devinee.
+-->
+<vito>
+  <commands>
+
+    <!--
+      Constate le 8 aout 2026 par lecture directe sur la chaudiere.
+
+      vito.xml declare <len>2</len>. Sur 2 octets on lit 9707, sur 4 octets
+      206315 (brut EB 25 03 00). Les deux octets de poids fort valent 03 00 :
+      le compteur a donc deja depasse trois fois 65536, et la lecture courte
+      n'en montrait que le mot de poids faible.
+
+      Coherence : le releve du 7 octobre 2025 donnait 196980. L'ecart de 9335
+      demarrages sur dix mois, soit ~31 par jour, est plausible pour cette
+      installation. Lu sur 2 octets, l'ecart aurait ete negatif.
+    -->
+    <command name="getBrennerStarts" protocmd="getaddr">
+      <addr>088A</addr>
+      <len>4</len>
+      <unit>CO</unit>
+      <description>Ermittle die Brennerstarts</description>
+    </command>
+
+  </commands>
+</vito>

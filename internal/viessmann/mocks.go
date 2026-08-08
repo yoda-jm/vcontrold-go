@@ -45,18 +45,18 @@ func (m *MockSerialCommunicator) SetWriteError(address uint16, err error) {
 // ReadFromDevice returns the mock response or error
 func (m *MockSerialCommunicator) ReadFromDevice(address uint16, size int) ([]byte, error) {
 	m.callCount++
-	
+
 	if err, exists := m.errors[address]; exists {
 		return nil, err
 	}
-	
+
 	if data, exists := m.responses[address]; exists {
 		if len(data) >= size {
 			return data[:size], nil
 		}
 		return data, nil
 	}
-	
+
 	// Default response for unknown addresses
 	return make([]byte, size), nil
 }
@@ -79,11 +79,11 @@ func (m *MockSerialCommunicator) GetCallCount() int {
 // WriteToDevice mock implementation for writing to device
 func (m *MockSerialCommunicator) WriteToDevice(address uint16, data []byte) error {
 	m.callCount++
-	
+
 	if m.errorAddress != 0 && m.errorAddress == address {
 		return m.errorResponse
 	}
-	
+
 	// Mock successful write
 	return nil
 }

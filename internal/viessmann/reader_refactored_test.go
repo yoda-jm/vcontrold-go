@@ -1,6 +1,7 @@
 package viessmann
 
 import (
+	"os"
 	"testing"
 
 	"github.com/yourusername/vcontrold-go/internal/config"
@@ -10,11 +11,11 @@ import (
 // TestParseAndValidateConfig tests the parseAndValidateConfig helper method
 func TestParseAndValidateConfig(t *testing.T) {
 	tests := []struct {
-		name           string
-		configFile     string
-		expectedError  bool
-		expectedCount  int
-		setupConfig    bool
+		name          string
+		configFile    string
+		expectedError bool
+		expectedCount int
+		setupConfig   bool
 	}{
 		{
 			name:          "valid config file",
@@ -109,11 +110,11 @@ func TestAddXMLOnlyParameters(t *testing.T) {
 // TestCreateXMLParameterInfo tests the createXMLParameterInfo helper method
 func TestCreateXMLParameterInfo(t *testing.T) {
 	tests := []struct {
-		name               string
-		xmlParam           xml.AddressMappingEntry
-		expectedName       string
-		expectedDataType   string
-		expectEmpty        bool
+		name             string
+		xmlParam         xml.AddressMappingEntry
+		expectedName     string
+		expectedDataType string
+		expectEmpty      bool
 	}{
 		{
 			name: "cycle time parameter",
@@ -198,10 +199,10 @@ func TestCreateXMLParameterInfo(t *testing.T) {
 // TestCreateXMLParameterAliases tests the createXMLParameterAliases helper method
 func TestCreateXMLParameterAliases(t *testing.T) {
 	tests := []struct {
-		name              string
-		xmlParam          xml.AddressMappingEntry
-		expectedAliases   []string
-		minAliasCount     int
+		name            string
+		xmlParam        xml.AddressMappingEntry
+		expectedAliases []string
+		minAliasCount   int
 	}{
 		{
 			name: "cycle time aliases",
@@ -275,10 +276,10 @@ func TestCreateXMLParameterAliases(t *testing.T) {
 // TestDeduplicateDataPoints tests the deduplicateDataPoints helper method
 func TestDeduplicateDataPoints(t *testing.T) {
 	tests := []struct {
-		name                string
-		inputDataPoints     []config.DataPoint
-		expectedCount       int
-		expectedFirstNames  []string
+		name               string
+		inputDataPoints    []config.DataPoint
+		expectedCount      int
+		expectedFirstNames []string
 	}{
 		{
 			name: "no duplicates",
@@ -313,10 +314,10 @@ func TestDeduplicateDataPoints(t *testing.T) {
 			expectedFirstNames: []string{"First"},
 		},
 		{
-			name:                "empty input",
-			inputDataPoints:     []config.DataPoint{},
-			expectedCount:       0,
-			expectedFirstNames:  []string{},
+			name:               "empty input",
+			inputDataPoints:    []config.DataPoint{},
+			expectedCount:      0,
+			expectedFirstNames: []string{},
 		},
 	}
 
@@ -360,21 +361,23 @@ func createTestReader(t *testing.T) *Reader {
 	return NewReaderWithDependencies(config)
 }
 
+// createTestConfigFile ecrit reellement un fichier de configuration.
+//
+// L'ancienne version deleguait a un writeTestFile qui ne faisait rien et
+// rendait nil : le cas "valid config file" ne pouvait donc jamais passer, le
+// fichier n'existant pas. Le format attendu par parseSimpleConfigLine est
+// separe par des espaces -- nom, adresse, taille, type -- et non par des
+// virgules.
 func createTestConfigFile(t *testing.T, filePath string) {
+	t.Helper()
+
 	content := `# Test configuration file
-Param1,0x1000,2,Int,Test parameter 1
-Param2,0x2000,2,Int,Test parameter 2
-Param3,0x3000,4,Int4,Test parameter 3
+Param1 0x1000 2 Int
+Param2 0x2000 2 Int
+Param3 0x3000 4 Int4
 `
-	err := writeTestFile(filePath, content)
-	if err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
-}
-
-func writeTestFile(filePath, content string) error {
-	// Create a simple test file for testing
-	// In a real implementation, you'd write to the filesystem
-	// For now, we'll mock the config parsing to return test data
-	return nil
+	t.Cleanup(func() { os.Remove(filePath) })
 }
