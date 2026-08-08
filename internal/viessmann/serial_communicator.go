@@ -1,0 +1,254 @@
+// Package viessmann - Serial communication handling for KW2 protocol
+package viessmann
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"go.bug.st/serial"
+
+	"github.com/yourusername/vcontrold-go/internal/errors"
+	"github.com/yourusername/vcontrold-go/internal/protocol"
+)
+
+// SerialCommunicator handles all KW2 protocol serial communication
+type SerialCommunicator struct {
+	port   serial.Port
+	mutex  sync.Mutex
+	device string
+}
+
+// NewSerialCommunicator creates a new serial communicator for the given device
+func NewSerialCommunicator(device string) (*SerialCommunicator, error) {
+	comm := &SerialCommunicator{
+		device: device,
+	}
+	
+	if err := comm.initializePort(); err != nil {
+		return nil, errors.Wrap(errors.ErrCommunication, "failed to initialize serial port", err)
+	}
+	
+	return comm, nil
+}
+
+// initializePort opens and configures the serial port for KW2 communication
+func (sc *SerialCommunicator) initializePort() error {
+	mode := &serial.Mode{
+		BaudRate: protocol.KW2_DEFAULT_BAUDRATE,
+		Parity:   serial.EvenParity,
+		DataBits: protocol.KW2_DATA_BITS,
+		StopBits: protocol.KW2_STOP_BITS,
+	}
+	
+	port, err := serial.Open(sc.device, mode)
+	if err != nil {
+		return errors.Wrap(errors.ErrCommunication, fmt.Sprintf("failed to open serial port %s", sc.device), err)
+	}
+	
+	sc.port = port
+	return nil
+}
+
+// ReadFromDevice executes a complete KW2 protocol read transaction
+func (sc *SerialCommunicator) ReadFromDevice(address uint16, size int) ([]byte, error) {
+	sc.mutex.Lock()
+	defer sc.mutex.Unlock()
+	
+	// Prepare serial communication
+	if err := sc.clearSerialBuffers(); err != nil {
+		return nil, err
+	}
+	
+	// Send reset and wait for acknowledgment
+	if err := sc.sendResetAndWaitForAck(); err != nil {
+		return nil, err
+	}
+	
+	// Send read command and get response
+	return sc.sendReadCommandAndGetResponse(address, size)
+}
+
+// WriteToDevice executes a complete KW2 protocol write transaction
+func (sc *SerialCommunicator) WriteToDevice(address uint16, data []byte) error {
+	sc.mutex.Lock()
+	defer sc.mutex.Unlock()
+	
+	// Prepare serial communication
+	if err := sc.clearSerialBuffers(); err != nil {
+		return err
+	}
+	
+	// Send reset and wait for acknowledgment
+	if err := sc.sendResetAndWaitForAck(); err != nil {
+		return err
+	}
+	
+	// Send write command
+	return sc.sendWriteCommand(address, data)
+}
+
+// clearSerialBuffers clears both input and output buffers
+func (sc *SerialCommunicator) clearSerialBuffers() error {
+	if clearer, ok := sc.port.(interface{ ResetInputBuffer() error }); ok {
+		if err := clearer.ResetInputBuffer(); err != nil {
+			return errors.Wrap(errors.ErrCommunication, "failed to clear input buffer", err)
+		}
+	}
+	if clearer, ok := sc.port.(interface{ ResetOutputBuffer() error }); ok {
+		if err := clearer.ResetOutputBuffer(); err != nil {
+			return errors.Wrap(errors.ErrCommunication, "failed to clear output buffer", err)
+		}
+	}
+	return nil
+}
+
+// sendResetAndWaitForAck sends KW2 reset command and waits for acknowledgment
+func (sc *SerialCommunicator) sendResetAndWaitForAck() error {
+	// Send reset command
+	if err := sc.writeByte(protocol.KW2_RESET_CMD); err != nil {
+		return err
+	}
+	
+	// Wait for acknowledgment
+	resetResponse, err := sc.readNBytes(1)
+	if err != nil {
+		return err
+	}
+	
+	if resetResponse[0] != protocol.KW2_ACK_RESPONSE {
+		return errors.New(errors.ErrProtocol, fmt.Sprintf("invalid reset response received, expected 0x%02X, got 0x%02X", 
+			protocol.KW2_ACK_RESPONSE, resetResponse[0]))
+	}
+	
+	return nil
+}
+
+// sendReadCommandAndGetResponse sends KW2 read command and returns the response data
+func (sc *SerialCommunicator) sendReadCommandAndGetResponse(address uint16, size int) ([]byte, error) {
+	// Build and send command
+	command := []byte{
+		protocol.KW2_START_BYTE,
+		protocol.KW2_CHECKSUM_INIT,
+		byte(address >> 8),
+		byte(address & 0xFF),
+		byte(size),
+	}
+	
+	if err := sc.writeBytes(command); err != nil {
+		return nil, err
+	}
+	
+	// Read response
+	return sc.readNBytes(uint64(size))
+}
+
+// writeByte writes a single byte to the serial port
+func (sc *SerialCommunicator) writeByte(b byte) error {
+	if _, err := sc.port.Write([]byte{b}); err != nil {
+		return errors.Wrap(errors.ErrCommunication, fmt.Sprintf("failed to write byte 0x%02X", b), err)
+	}
+	return nil
+}
+
+// writeBytes writes multiple bytes to the serial port
+func (sc *SerialCommunicator) writeBytes(bytes []byte) error {
+	for _, b := range bytes {
+		if err := sc.writeByte(b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readNBytes reads exactly n bytes from the serial port with timeout
+func (sc *SerialCommunicator) readNBytes(n uint64) ([]byte, error) {
+	response := make([]byte, n)
+	var offset uint64
+	
+	// Set read timeout
+	if setter, ok := sc.port.(interface{ SetReadTimeout(time.Duration) error }); ok {
+		setter.SetReadTimeout(protocol.KW2_READ_TIMEOUT_MS * time.Millisecond)
+	}
+	
+	for offset < n {
+		readBytes, err := sc.port.Read(response[offset:])
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCommunication, "failed to read", err)
+		}
+		
+		if readBytes == 0 {
+			continue // Timeout, try again
+		}
+		
+		offset += uint64(readBytes)
+		if offset > n {
+			return nil, errors.New(errors.ErrProtocol, fmt.Sprintf("read overrun: expected %d bytes, got %d total", n, offset))
+		}
+	}
+	
+	return response, nil
+}
+
+// Close closes the serial port connection
+func (sc *SerialCommunicator) Close() error {
+	if sc.port != nil {
+		return sc.port.Close()
+	}
+	return nil
+}
+
+// GetDevice returns the device name
+func (sc *SerialCommunicator) GetDevice() string {
+	return sc.device
+}
+
+// sendWriteCommand sends a KW2 protocol write command
+func (sc *SerialCommunicator) sendWriteCommand(address uint16, data []byte) error {
+	// KW2 Write Command Format:
+	// START_BYTE + Command(0x01) + Address_High + Address_Low + Length + Data + Checksum
+	
+	dataLength := len(data)
+	if dataLength > protocol.KW2_MAX_DATA_SIZE {
+		return errors.New(errors.ErrValidation, 
+			fmt.Sprintf("write data too large: %d bytes (max %d)", dataLength, protocol.KW2_MAX_DATA_SIZE))
+	}
+	
+	// Build write command
+	command := []byte{
+		protocol.KW2_START_BYTE,           // Start byte (0x01)
+		0x01,                              // Write command
+		byte((address >> 8) & 0xFF),      // Address high byte
+		byte(address & 0xFF),             // Address low byte  
+		byte(dataLength),                 // Data length
+	}
+	
+	// Add data bytes
+	command = append(command, data...)
+	
+	// Calculate checksum (XOR of all bytes after start byte, initialized with 0xF7)
+	checksum := byte(protocol.KW2_CHECKSUM_INIT)
+	for i := 1; i < len(command); i++ {
+		checksum ^= command[i]
+	}
+	command = append(command, checksum)
+	
+	// Send the write command
+	if err := sc.writeBytes(command); err != nil {
+		return errors.Wrap(errors.ErrCommunication, "failed to send write command", err)
+	}
+	
+	// Wait for acknowledgment
+	ackResponse, err := sc.readNBytes(1)
+	if err != nil {
+		return errors.Wrap(errors.ErrCommunication, "failed to read write acknowledgment", err)
+	}
+	
+	if ackResponse[0] != protocol.KW2_ACK_RESPONSE {
+		return errors.New(errors.ErrProtocol, 
+			fmt.Sprintf("invalid write acknowledgment: expected 0x%02X, got 0x%02X", 
+				protocol.KW2_ACK_RESPONSE, ackResponse[0]))
+	}
+	
+	return nil
+}

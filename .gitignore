@@ -1,0 +1,73 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Build directory
+build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Configuration files with sensitive data
+config_local.txt
+*_local.txt
+secrets/
+
+# Backup files
+old/
+backup/
+*.bak
+
+# XML files (user should provide their own)
+xml/
+*.xml
+
+# Test data
+test_data/
+# Binaires compiles a la racine (pas d'extension)
+/vcontrold-go
+/config_parser
+coverage.out
+
+# Dependances recuperees par scripts/bootstrap.sh
+third_party/
+/cmd/vcontrold-go/vcontrold-go
+
+# Archive locale des fichiers ecartes du depot public
+.archive-local/
+
+# Configuration reelle : contient identifiants et adresses internes
+config-openv.yaml
+config.yaml
+.env
