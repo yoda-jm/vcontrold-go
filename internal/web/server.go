@@ -52,6 +52,15 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 		log.Printf("MQTT discovery not published: %v", err)
 	}
 
+	if cfg.YamlConfig != nil {
+		if err := s.mqttPublisher.PublishClimateDiscovery(cfg.YamlConfig.Climates); err != nil {
+			log.Printf("MQTT climate discovery not published: %v", err)
+		}
+		if err := s.mqttPublisher.PublishDerivedDiscovery(cfg.YamlConfig.Derived); err != nil {
+			log.Printf("MQTT derived discovery not published: %v", err)
+		}
+	}
+
 	// Initialize MQTT hook manager
 	s.hookManager = mqtt.NewHookManager(cfg, reader)
 	if cfg.YamlConfig != nil && len(cfg.YamlConfig.MQTTHooks) > 0 {

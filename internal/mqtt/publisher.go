@@ -29,6 +29,10 @@ type Publisher struct {
 	mutex         sync.RWMutex
 	enabled       bool
 	client        mqtt.Client // MQTT client instance
+
+	// Grandeurs calculees a partir des mesures publiees.
+	derived        *derivedState
+	derivedConfigs []config.MQTTDerivedConfig
 }
 
 // NewPublisher creates a new MQTT publisher
@@ -229,6 +233,12 @@ func (p *Publisher) publishValue(topic, value string, address uint16, alias stri
 	}
 
 	log.Printf("MQTT PUBLISHED: %s = '%s' (0x%04X -> %s) [cleaned from: '%s']", topic, cleanedValue, address, alias, value)
+
+	// Une mesure vient de changer : les grandeurs qui en decoulent aussi.
+	if p.derived != nil {
+		p.derived.record(alias, cleanedValue)
+		p.publishDerived()
+	}
 }
 
 // UpdateConfig updates the MQTT configuration

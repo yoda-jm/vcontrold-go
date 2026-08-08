@@ -148,6 +148,20 @@ func (r *Reader) ReadParameter(dp config.DataPoint, index int) Reading {
 				continue // Try again or fail
 			}
 
+			// Valeur reservee « pas de donnee » : inutile de reessayer, le
+			// point de mesure n'existe pas sur cet appareil. La publier
+			// donnerait une mesure absurde -- 3276,7 °C pour un capteur
+			// solaire absent.
+			if IsUnavailableValue(rawValue) {
+				reading.RawValue = rawValue
+				reading.Error = fmt.Sprintf("datapoint not available on this appliance (raw % X)", rawValue)
+				reading.FormattedValue = "unavailable"
+				r.metrics.IncrementErrorCount()
+				r.cache.Set(dp.Address, reading)
+				r.logger.Warn("%s (0x%04X) is not available on this appliance (raw % X)", dp.Name, dp.Address, rawValue)
+				return reading
+			}
+
 			// Success!
 			reading.RawValue = rawValue
 			reading.Success = true

@@ -53,6 +53,69 @@ type YamlConfig struct {
 
 	// MQTT hooks for listening to topics and executing actions
 	MQTTHooks []MQTTHookConfig `yaml:"mqtt_hooks" json:"mqtt_hooks"`
+
+	// Entites climate exposees a Home Assistant (eau chaude, chauffage).
+	Climates []MQTTClimateConfig `yaml:"mqtt_climates" json:"mqtt_climates"`
+
+	// Grandeurs calculees a partir de deux mesures publiees.
+	Derived []MQTTDerivedConfig `yaml:"mqtt_derived" json:"mqtt_derived"`
+}
+
+// MQTTDerivedConfig decrit un rapport entre deux mesures deja publiees.
+//
+// Volontairement limite a un rapport : la seule grandeur derivee utile ici est
+// la duree moyenne d'un cycle de bruleur, et un moteur d'expressions complet
+// serait une dette pour un unique cas d'usage.
+type MQTTDerivedConfig struct {
+	Alias        string  `yaml:"alias" json:"alias"`
+	FriendlyName string  `yaml:"friendly_name" json:"friendly_name"`
+	Numerator    string  `yaml:"numerator_alias" json:"numerator_alias"`
+	Denominator  string  `yaml:"denominator_alias" json:"denominator_alias"`
+	Factor       float64 `yaml:"factor" json:"factor"`
+	Unit         string  `yaml:"unit,omitempty" json:"unit,omitempty"`
+	StateClass   string  `yaml:"state_class,omitempty" json:"state_class,omitempty"`
+	DeviceClass  string  `yaml:"device_class,omitempty" json:"device_class,omitempty"`
+	Icon         string  `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Precision    int     `yaml:"precision,omitempty" json:"precision,omitempty"`
+}
+
+// MQTTClimateConfig decrit une entite climate Home Assistant.
+//
+// Une entite climate regroupe une consigne reglable, une temperature mesuree
+// et un mode : c'est ce qui permet de piloter depuis un thermostat plutot que
+// depuis un curseur nu.
+type MQTTClimateConfig struct {
+	Name     string `yaml:"name" json:"name"`
+	ObjectID string `yaml:"object_id" json:"object_id"`
+	Icon     string `yaml:"icon,omitempty" json:"icon,omitempty"`
+
+	// Alias du topic portant la consigne courante, et adresse a ecrire.
+	TargetAlias   string `yaml:"target_alias" json:"target_alias"`
+	TargetAddress string `yaml:"target_address" json:"target_address"`
+
+	// Alias du topic portant la temperature mesuree. Facultatif : la
+	// regulation KW2 n'expose aucune sonde d'ambiance, et une entite sans
+	// temperature courante reste honnete.
+	CurrentAlias string `yaml:"current_alias,omitempty" json:"current_alias,omitempty"`
+
+	MinTemp  float64 `yaml:"min_temp" json:"min_temp"`
+	MaxTemp  float64 `yaml:"max_temp" json:"max_temp"`
+	TempStep float64 `yaml:"temp_step,omitempty" json:"temp_step,omitempty"`
+
+	// Modes proposes. La regulation n'a qu'un mode global (unite BA) : le
+	// laisser vide expose une entite a consigne seule, ce qui evite de
+	// promettre un pilotage par zone que l'appareil ne sait pas faire.
+	Modes       []string `yaml:"modes,omitempty" json:"modes,omitempty"`
+	ModeAlias   string   `yaml:"mode_alias,omitempty" json:"mode_alias,omitempty"`
+	ModeAddress string   `yaml:"mode_address,omitempty" json:"mode_address,omitempty"`
+
+	// ModeTemplate traduit l'etat brut du topic de mode en mode HVAC. Sans
+	// lui, Home Assistant place l'entite sur « off » et masque la consigne.
+	ModeTemplate string `yaml:"mode_template,omitempty" json:"mode_template,omitempty"`
+
+	// ActionAlias porte l'etat du bruleur : il alimente hvac_action, donc
+	// l'indication « chauffe / en veille » dans Home Assistant.
+	ActionAlias string `yaml:"action_alias,omitempty" json:"action_alias,omitempty"`
 }
 
 // AutoRefreshConfig defines parameters to automatically refresh

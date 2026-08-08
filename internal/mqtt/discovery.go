@@ -85,6 +85,11 @@ func metadataForUnit(vitoUnit string) sensorMetadata {
 			Unit:       "%",
 			StateClass: "measurement",
 		}
+	case "UN": // Neigung : pente de la courbe de chauffe, sans unite
+		return sensorMetadata{
+			StateClass: "measurement",
+			Icon:       "mdi:chart-line",
+		}
 	case "ST": // Status numerique simple
 		return sensorMetadata{StateClass: "measurement"}
 	case "RT": // ReturnStatus : enum 0/1, marche/arret
