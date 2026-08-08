@@ -10,6 +10,11 @@
 #   sensor.vitola_mode_de_fonctionnement
 #   binary_sensor.vitola_bruleur          binary_sensor.vitola_circulateur_m1
 #
+# Les trois capteurs dérivés plus bas sont nommés « Vitola … » à dessein :
+# Home Assistant construit l'entity_id à partir du NOM, pas de l'unique_id.
+# Le préfixe rend donc les identifiants prévisibles — sensor.vitola_… — et le
+# tableau de bord n'a pas à deviner.
+#
 # Ce fichier contient deux choses indépendantes :
 #   1. des capteurs dérivés, à mettre dans configuration.yaml ;
 #   2. une vue de tableau de bord, à coller dans l'éditeur Lovelace.
@@ -34,8 +39,8 @@ template:
       #
       # C'est exactement l'argument qui permet de ne pas reproduire l'erreur
       # en dimensionnant la pompe à chaleur.
-      - name: "Durée moyenne d'un cycle brûleur"
-        unique_id: vitola_duree_moyenne_cycle
+      - name: "Vitola cycle brûleur moyen"
+        unique_id: vitola_cycle_bruleur_moyen
         unit_of_measurement: "min"
         state_class: measurement
         icon: mdi:timer-sand
@@ -50,7 +55,7 @@ template:
 
       # Écart entre la température de chaudière et la consigne ECS : dit d'un
       # coup d'oeil si la chaudière chauffe pour rien.
-      - name: "Écart chaudière / eau chaude"
+      - name: "Vitola écart chaudière ECS"
         unique_id: vitola_ecart_chaudiere_ecs
         unit_of_measurement: "°C"
         device_class: temperature
@@ -65,8 +70,8 @@ template:
              | round(1) }}
 
       # Le mode brut est un code du XML communautaire (unité BA). Traduit.
-      - name: "Mode chaudière"
-        unique_id: vitola_mode_lisible
+      - name: "Vitola mode"
+        unique_id: vitola_mode
         icon: mdi:tune-variant
         state: >
           {% set m = states('sensor.vitola_mode_de_fonctionnement') %}
@@ -107,7 +112,7 @@ views:
             name: Brûleur
           - entity: binary_sensor.vitola_circulateur_m1
             name: Circulateur M1
-          - entity: sensor.vitola_mode_lisible
+          - entity: sensor.vitola_mode
             name: Mode
           - type: divider
           - entity: sensor.vitola_consigne_eau_chaude
@@ -175,7 +180,7 @@ views:
             name: Démarrages
           - type: divider
           # Un cycle de ~3 min confirme un fort surdimensionnement.
-          - entity: sensor.vitola_duree_moyenne_cycle
+          - entity: sensor.vitola_cycle_bruleur_moyen
             name: Durée moyenne d'un cycle
 
       - type: history-graph
