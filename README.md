@@ -60,9 +60,35 @@ go build ./cmd/vcontrold-go
 - `-config string`: V200KW2 configuration file to parse (optional)
 - `-vcontrol-xml string`: Path to vcontrold.xml unit definitions (default "xml/vcontrold.xml")
 - `-vito-xml string`: Path to vito.xml address mappings (default "xml/vito.xml")
+- `-vito-overrides-xml string`: Machine-specific address overrides applied on top of vito.xml
+- `-yaml-config string`: YAML configuration file — **required for MQTT and refresh groups**
+- `-address string`: Read a single parameter by hex address, e.g. `0x08A7`
+- `-size int`: Override the read length for `-address` (0 = take it from vito.xml)
 - `-port string`: HTTP server port (default "8080")
 - `-web`: Start web server instead of CLI
 - `-verbose`: Show verbose output
+
+Note that `-config` and `-yaml-config` are different things: `-config` is a
+`DP_Listen` datapoint list, while `-yaml-config` is this project's own
+configuration. Only the latter enables MQTT.
+
+### Address overrides
+
+`vito.xml` describes a family of appliances, not one specimen, and some of its
+lengths are wrong for a given machine. Overrides are applied on top of it so
+that `make deps` can refresh the community XML without losing local findings:
+
+```xml
+<!-- overrides/vitola200-kw2.xml -->
+<command name="getBrennerStarts" protocmd="getaddr">
+  <addr>088A</addr>
+  <len>4</len>          <!-- vito.xml says 2; the counter is really 4 bytes -->
+  <unit>CO</unit>
+</command>
+```
+
+Read on 2 bytes that counter reports 9707 — the truncated low word of 206315.
+Every override must cite the measurement that justifies it.
 
 ### Web Interface Mode
 
@@ -201,20 +227,35 @@ The web interface provides:
 - ✓ **Green**: Parameter found in XML with proper unit conversion
 - ? **Red**: Parameter not in XML, using inference or fallback
 
-## MQTT Integration (Planned)
+## MQTT and Home Assistant
 
-The system includes MQTT client placeholder for future Home Assistant integration:
+MQTT publishing is carried by the web server. **`web: true` is mandatory** — in
+CLI mode the daemon reads once and exits without ever publishing.
 
 ```bash
-# Planned MQTT support
-./vcontrold-go -web -mqtt-broker homeassistant.local -mqtt-topic viessmann
+./vcontrold-go --yaml-config config-openv.yaml
 ```
 
-Features will include:
-- Home Assistant discovery
-- Real-time parameter publishing
-- Command reception for parameter changes
-- Scheduled reading support
+Values are published retained to `<topic_root>/<alias>`, and each monitored
+address also gets a **retained Home Assistant discovery message** on
+`homeassistant/sensor/<device>/<object>/config`.
+
+The `state_class` in those messages is what matters: without it Home Assistant
+does not keep the entity in long-term statistics, and the history disappears
+with the recorder purge (ten days by default). It is derived from the vito.xml
+unit — `total_increasing` for counters (`CS`, `CO`), `measurement` for
+temperatures (`UT`) — and can be overridden per address in the YAML.
+
+The broker account needs write access on both topic trees, e.g. for mosquitto:
+
+```
+user vcontrol
+topic readwrite openv/#
+topic write homeassistant/#
+```
+
+and the Home Assistant account needs `topic read openv/#`, since the discovery
+messages land under `homeassistant/` but the state topics do not.
 
 ## Architecture
 
