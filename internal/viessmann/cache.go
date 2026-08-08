@@ -86,21 +86,6 @@ func (c *ParameterCache) RemoveAllCallbacks() {
 	c.callbacks = make([]CacheCallback, 0)
 }
 
-// fireEvent fires an event to all registered callbacks
-func (c *ParameterCache) fireEvent(event CacheEvent) {
-	// Fire callbacks in separate goroutines to avoid blocking
-	for _, callback := range c.callbacks {
-		go func(cb CacheCallback) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("Cache callback panic: %v", r)
-				}
-			}()
-			cb(event)
-		}(callback)
-	}
-}
-
 // Get returns a cached reading for the given address
 func (c *ParameterCache) Get(address uint16) (*CachedReading, bool) {
 	c.mutex.RLock()
