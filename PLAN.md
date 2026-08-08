@@ -347,16 +347,40 @@ c'est directement exploitable pour le dimensionnement de la PAC.
    `readNBytes` par un *nombre* de tentatives est trop sévère — la régulation
    n'émet son `05` que par intermittence. Seule une échéance de durée convient.
 
+### Le blocage MQTT, et sa cause
+
+Le compte `vcontrol` existait bien dans le fichier de mots de passe du courtier,
+mais **n'avait aucune entrée dans `aclfile`** : mosquitto refuse alors tout, et
+en MQTT 3.1.1 le PUBACK est indiscernable d'un succès. C'est `mosquitto_pub -V 5`
+qui a tranché — `RC:135 (Not authorized)`.
+
+Deux règles ont suffi : `topic readwrite openv/#` et `topic write
+homeassistant/#` pour le daemon, plus `topic read openv/#` pour Home Assistant,
+dont l'ACL de lecture était restreinte à `frigate/#` et qui n'aurait donc jamais
+vu la chaudière.
+
+*Leçon : un PUBACK ne prouve rien en 3.1.1. Vérifier en v5.*
+
+### État actuel
+
+Le daemon tourne en service systemd **utilisateur** sur la machine cible, avec
+`linger` activé pour survivre aux redémarrages. Les neuf adresses sont lues et
+publiées sans erreur, et la découverte Home Assistant part retenue avec les
+`state_class`.
+
+Les états 0/1 sont publiés en `binary_sensor`, un testament MQTT signale
+l'indisponibilité du daemon, et `object_id` fixe les `entity_id` pour que le
+tableau de bord n'ait pas à deviner d'identifiants.
+
 ### Reste à faire
 
-**Le broker MQTT refuse toute écriture.** Il répond
-`PUBACK RC:135 (Not authorized)` en MQTT v5 pour `vcontrold`, `vcontrol` et
-`homeassistant`, sur tous les topics. Le compte qui publiait autrefois
-(`vcontrold`, topic `Viessmann`) n'existe plus : il est refusé dès le CONNECT.
-Rien sur la machine cible ne permet de le retrouver — historique, `sources/` et
-`settings_ini.py` pointent tous vers ce même identifiant périmé.
-
-Il faut recréer le compte sur le broker, avec le droit d'écrire sur `openv/#` et
-`homeassistant/#`. Tout le reste est prêt : les neuf adresses sont lues et
-publiées sans erreur, et la découverte Home Assistant part avec les
-`state_class`.
+- **Coller la vue Lovelace** de `config/home_assistant_vitola.yaml` dans le
+  tableau de bord, et ses capteurs dérivés dans `configuration.yaml`. Cela
+  demande un accès à Home Assistant qui n'était pas disponible.
+- **Six topics périmés** subsistent sous `openv/` depuis l'ancienne installation
+  (`boiler_temp`, `return_temp`, `hot_water_setpoint`, `outside_temp`,
+  `getTempVLsollM1`, `getStatus3301`). Leurs valeurs datent de 2025 et sont
+  fausses ; ils ne sont plus alimentés. À effacer par un message retenu vide,
+  une fois confirmé qu'aucune automatisation ne s'y réfère.
+- **`go.mod`** garde le chemin `github.com/yourusername/vcontrold-go` : renommage
+  volontairement remis à plus tard, il touche tous les imports.
