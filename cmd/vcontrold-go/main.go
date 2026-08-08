@@ -19,6 +19,10 @@ import (
 type singleRead struct {
 	address string // hex address, empty when not in single-read mode
 	size    int    // 0 = take the length from vito.xml
+
+	// verifyWrite porte l'adresse a soumettre au protocole de verification
+	// d'ecriture de CLAUDE.md. Vide = pas de verification.
+	verifyWrite string
 }
 
 func main() {
@@ -171,6 +175,8 @@ func parseConfiguration() (*config.Config, singleRead, error) {
 	var probe singleRead
 	flag.StringVar(&probe.address, "address", "", "Read single parameter by hex address (e.g., 0x5525)")
 	flag.IntVar(&probe.size, "size", 0, "Override read length in bytes for -address (0 = use vito.xml)")
+	flag.StringVar(&probe.verifyWrite, "verify-write", "",
+		"Exercise the write path at this hex address by rewriting its current value unchanged")
 
 	flag.Parse()
 
@@ -310,6 +316,11 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 
 // runApplication handles the main application logic based on mode
 func runApplication(reader *viessmann.Reader, cfg *config.Config, probe singleRead) error {
+	// Verification du chemin d'ecriture : n'altere aucune valeur.
+	if probe.verifyWrite != "" {
+		return verifyWrite(reader, probe.verifyWrite)
+	}
+
 	// Handle single address reading mode
 	if probe.address != "" {
 		return readSingleAddress(reader, probe.address, cfg, probe.size)

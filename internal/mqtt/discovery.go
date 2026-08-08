@@ -24,11 +24,14 @@ const (
 type discoveryPayload struct {
 	Name              string              `json:"name"`
 	UniqueID          string              `json:"unique_id"`
+	ObjectID          string              `json:"object_id"`
 	StateTopic        string              `json:"state_topic"`
 	UnitOfMeasurement string              `json:"unit_of_measurement,omitempty"`
 	DeviceClass       string              `json:"device_class,omitempty"`
 	StateClass        string              `json:"state_class,omitempty"`
 	Icon              string              `json:"icon,omitempty"`
+	PayloadOn         string              `json:"payload_on,omitempty"`
+	PayloadOff        string              `json:"payload_off,omitempty"`
 	Device            discoveryDevice     `json:"device"`
 	Availability      []map[string]string `json:"availability,omitempty"`
 }
@@ -111,6 +114,39 @@ func sanitizeObjectID(alias string) string {
 	return strings.Trim(cleaned, "_")
 }
 
+// slugify reduit un libelle a un identifiant Home Assistant : minuscules,
+// sans accents, mots separes par des soulignes.
+func slugify(label string) string {
+	// Les libelles sont francais : translitterer plutot que supprimer, sans
+	// quoi « Brûleur » donnerait « brleur ».
+	replacer := strings.NewReplacer(
+		"à", "a", "â", "a", "ä", "a",
+		"é", "e", "è", "e", "ê", "e", "ë", "e",
+		"î", "i", "ï", "i",
+		"ô", "o", "ö", "o",
+		"ù", "u", "û", "u", "ü", "u",
+		"ç", "c",
+	)
+	folded := replacer.Replace(strings.ToLower(label))
+
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range folded {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastUnderscore = false
+		default:
+			if !lastUnderscore && b.Len() > 0 {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		}
+	}
+
+	return strings.Trim(b.String(), "_")
+}
+
 // PublishDiscovery publie un message de decouverte RETENU par adresse surveillee.
 //
 // Le flag retain est indispensable : sans lui, Home Assistant perd toutes les
@@ -151,6 +187,14 @@ func (p *Publisher) PublishDiscovery() error {
 		}
 		if addr.DeviceClass != "" {
 			meta.DeviceClass = addr.DeviceClass
+			// L'icone deduite de l'unite vito.xml est un pis-aller : l'unite RT
+			// couvre aussi bien le bruleur que le circulateur, et donnait une
+			// flamme aux deux. Des qu'une device_class est declaree, Home
+			// Assistant choisit mieux que nous.
+			meta.Icon = ""
+		}
+		if addr.Icon != "" {
+			meta.Icon = addr.Icon
 		}
 		if addr.StateClass != "" {
 			meta.StateClass = addr.StateClass
@@ -161,14 +205,45 @@ func (p *Publisher) PublishDiscovery() error {
 			friendlyName = alias
 		}
 
+		// Un etat 0/1 s'affiche bien mieux en binary_sensor : Home Assistant
+		// montre « Marche / Arret » la ou un sensor montrerait « 0 ».
+		component := addr.Component
+		if component == "" {
+			component = "sensor"
+		}
+		payloadOn, payloadOff := addr.PayloadOn, addr.PayloadOff
+		if component == "binary_sensor" {
+			if payloadOn == "" {
+				payloadOn = "1"
+			}
+			if payloadOff == "" {
+				payloadOff = "0"
+			}
+			// state_class n'a aucun sens sur un binaire, et Home Assistant
+			// refuse la configuration si on l'y laisse.
+			meta.StateClass = ""
+			meta.Unit = ""
+		}
+
 		payload := discoveryPayload{
-			Name:              friendlyName,
-			UniqueID:          fmt.Sprintf("%s_%s", deviceIdentifier, objectID),
+			Name:     friendlyName,
+			UniqueID: fmt.Sprintf("%s_%s", deviceIdentifier, objectID),
+			// object_id fixe l'entity_id cote Home Assistant. Sans lui, HA le
+			// derive du libelle et le tableau de bord devrait deviner des
+			// identifiants -- ils sont ici previsibles : sensor.vitola_<nom>.
+			ObjectID:          fmt.Sprintf("vitola_%s", slugify(friendlyName)),
 			StateTopic:        fmt.Sprintf("%s/%s", p.config.TopicRoot, alias),
 			UnitOfMeasurement: meta.Unit,
 			DeviceClass:       meta.DeviceClass,
 			StateClass:        meta.StateClass,
 			Icon:              meta.Icon,
+			PayloadOn:         payloadOn,
+			PayloadOff:        payloadOff,
+			Availability: []map[string]string{{
+				"topic":                 p.availabilityTopic(),
+				"payload_available":     availabilityOnline,
+				"payload_not_available": availabilityOffline,
+			}},
 			Device: discoveryDevice{
 				Identifiers:  []string{deviceIdentifier},
 				Name:         deviceName,
@@ -183,7 +258,7 @@ func (p *Publisher) PublishDiscovery() error {
 			continue
 		}
 
-		topic := fmt.Sprintf("homeassistant/sensor/%s/%s/config", deviceIdentifier, objectID)
+		topic := fmt.Sprintf("homeassistant/%s/%s/%s/config", component, deviceIdentifier, objectID)
 		token := p.client.Publish(topic, 0, true, body) // retain = true
 		if token.Wait() && token.Error() != nil {
 			log.Printf("MQTT discovery: failed to publish %s: %v", topic, token.Error())

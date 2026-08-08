@@ -65,12 +65,19 @@ func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
 // initMQTTClient initializes the MQTT client connection
 func (p *Publisher) initMQTTClient() {
 	clientID := fmt.Sprintf("vcontrold-go-%d", time.Now().Unix())
-	
+
+	// Testament : si le daemon meurt ou perd le reseau, le courtier publie
+	// "offline" a sa place. Sans cela, Home Assistant garderait indefiniment la
+	// derniere valeur retenue et afficherait une chaudiere a l arret comme si la
+	// mesure etait fraiche.
+	availabilityTopic := p.availabilityTopic()
+
 	opts := mqtt.NewClientOptions().
 		AddBroker(fmt.Sprintf("tcp://%s", p.config.Host)).
 		SetClientID(clientID).
-		SetCleanSession(true)
-	
+		SetCleanSession(true).
+		SetWill(availabilityTopic, availabilityOffline, 0, true)
+
 	// Set credentials if provided
 	if p.config.Username != "" {
 		opts.SetUsername(p.config.Username)
@@ -78,16 +85,22 @@ func (p *Publisher) initMQTTClient() {
 			opts.SetPassword(p.config.Password)
 		}
 	}
-	
+
 	// Set connection handlers
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
 		log.Printf("MQTT: Connection lost: %v", err)
 	})
-	
+
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		log.Printf("MQTT: Connected to broker %s", p.config.Host)
+
+		// A poser a chaque (re)connexion : apres une coupure, c'est le
+		// testament "offline" qui est retenu sur le courtier.
+		if token := client.Publish(availabilityTopic, 0, true, availabilityOnline); token.Wait() && token.Error() != nil {
+			log.Printf("MQTT: Failed to announce availability: %v", token.Error())
+		}
 	})
-	
+
 	// Create and connect client
 	p.client = mqtt.NewClient(opts)
 	if token := p.client.Connect(); token.Wait() && token.Error() != nil {
@@ -171,17 +184,17 @@ func (p *Publisher) shouldPublish(event viessmann.CacheEvent) (bool, string) {
 func (p *Publisher) cleanValueForHomeAssistant(value string) string {
 	// Remove common suffixes that aren't needed
 	value = strings.TrimSpace(value)
-	
+
 	// Remove unit annotations like " Grad Celsius (not in XML)"
 	re := regexp.MustCompile(`\s+\([^)]*\)$`)
 	value = re.ReplaceAllString(value, "")
-	
+
 	// Remove units for temperature values - extract just the number
 	tempPattern := regexp.MustCompile(`^(-?\d+(?:\.\d+)?)\s+Grad\s+Celsius$`)
 	if matches := tempPattern.FindStringSubmatch(value); len(matches) > 1 {
 		return matches[1]
 	}
-	
+
 	// For other units, try to extract just the numeric part if it starts with a number
 	numPattern := regexp.MustCompile(`^(-?\d+(?:\.\d+)?)`)
 	if matches := numPattern.FindStringSubmatch(value); len(matches) > 1 {
@@ -193,7 +206,7 @@ func (p *Publisher) cleanValueForHomeAssistant(value string) string {
 			}
 		}
 	}
-	
+
 	// For enums and text values, return as-is (already cleaned of annotations above)
 	return value
 }
@@ -204,17 +217,17 @@ func (p *Publisher) publishValue(topic, value string, address uint16, alias stri
 		log.Printf("MQTT: Cannot publish %s = '%s' - client not connected", topic, value)
 		return
 	}
-	
+
 	// Clean the value for Home Assistant
 	cleanedValue := p.cleanValueForHomeAssistant(value)
-	
+
 	// Publish with QoS 0 (at most once delivery) and retain flag set to true
 	token := p.client.Publish(topic, 0, true, cleanedValue)
 	if token.Wait() && token.Error() != nil {
 		log.Printf("MQTT: Failed to publish %s = '%s': %v", topic, cleanedValue, token.Error())
 		return
 	}
-	
+
 	log.Printf("MQTT PUBLISHED: %s = '%s' (0x%04X -> %s) [cleaned from: '%s']", topic, cleanedValue, address, alias, value)
 }
 
@@ -242,7 +255,7 @@ func (p *Publisher) UpdateConfig(newConfig *config.MQTTConfig) {
 				log.Printf("MQTT: Invalid address '%s' ignored: %v", addr.Address, err)
 			}
 		}
-		
+
 		// Reconnect with new config if enabled
 		if newConfig.Enabled {
 			p.initMQTTClient()
@@ -270,10 +283,10 @@ func (p *Publisher) GetStatus() map[string]interface{} {
 	for addr, lastPub := range p.lastPublished {
 		if alias, exists := p.addressMap[addr]; exists {
 			published[fmt.Sprintf("0x%04X", addr)] = map[string]interface{}{
-				"alias":        alias,
-				"lastPublish":  lastPub.Timestamp.Format(time.RFC3339),
-				"lastValue":    lastPub.Value,
-				"timeSince":    time.Since(lastPub.Timestamp).String(),
+				"alias":       alias,
+				"lastPublish": lastPub.Timestamp.Format(time.RFC3339),
+				"lastValue":   lastPub.Value,
+				"timeSince":   time.Since(lastPub.Timestamp).String(),
 			}
 		}
 	}
@@ -284,12 +297,28 @@ func (p *Publisher) GetStatus() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"enabled":           p.enabled,
-		"connected":         connected,
+		"enabled":          p.enabled,
+		"connected":        connected,
 		"broker":           p.config.Host,
-		"refreshThreshold":  threshold,
-		"monitoredCount":    len(p.addressMap),
-		"publishedCount":    len(p.lastPublished),
-		"publishedValues":   published,
+		"refreshThreshold": threshold,
+		"monitoredCount":   len(p.addressMap),
+		"publishedCount":   len(p.lastPublished),
+		"publishedValues":  published,
 	}
+}
+
+// Etats publies sur le topic de disponibilite, repris tels quels par la
+// decouverte Home Assistant.
+const (
+	availabilityOnline  = "online"
+	availabilityOffline = "offline"
+)
+
+// availabilityTopic rend le topic de disponibilite du daemon.
+func (p *Publisher) availabilityTopic() string {
+	root := "viessmann"
+	if p.config != nil && p.config.TopicRoot != "" {
+		root = p.config.TopicRoot
+	}
+	return root + "/status"
 }

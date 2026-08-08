@@ -93,6 +93,14 @@ type MQTTAddress struct {
 	StateClass   string `yaml:"state_class,omitempty" json:"state_class,omitempty"`
 	Unit         string `yaml:"unit,omitempty" json:"unit,omitempty"`
 	FriendlyName string `yaml:"friendly_name,omitempty" json:"friendly_name,omitempty"`
+
+	// Component choisit le type d'entite Home Assistant : "sensor" (defaut) ou
+	// "binary_sensor". Les etats 0/1 -- bruleur, circulateur -- s'affichent bien
+	// mieux en binary_sensor : « Marche / Arret » plutot qu'un « 0 » nu.
+	Icon       string `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Component  string `yaml:"component,omitempty" json:"component,omitempty"`
+	PayloadOn  string `yaml:"payload_on,omitempty" json:"payload_on,omitempty"`
+	PayloadOff string `yaml:"payload_off,omitempty" json:"payload_off,omitempty"`
 }
 
 // MQTTHookConfig defines a hook configuration in YAML
