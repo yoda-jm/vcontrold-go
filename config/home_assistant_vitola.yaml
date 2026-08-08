@@ -1,0 +1,201 @@
+# Vitola 200 — intégration Home Assistant
+#
+# Les neuf entités sont créées automatiquement par découverte MQTT : rien à
+# déclarer. Leurs identifiants sont fixés par `object_id` côté daemon, donc
+# stables et prévisibles :
+#
+#   sensor.vitola_heures_bruleur          sensor.vitola_temperature_exterieure
+#   sensor.vitola_demarrages_bruleur      sensor.vitola_temperature_chaudiere
+#   sensor.vitola_consigne_eau_chaude     sensor.vitola_temperature_eau_chaude
+#   sensor.vitola_mode_de_fonctionnement
+#   binary_sensor.vitola_bruleur          binary_sensor.vitola_circulateur_m1
+#
+# Ce fichier contient deux choses indépendantes :
+#   1. des capteurs dérivés, à mettre dans configuration.yaml ;
+#   2. une vue de tableau de bord, à coller dans l'éditeur Lovelace.
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. CAPTEURS DÉRIVÉS  →  configuration.yaml
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# À placer sous la clé `template:` de configuration.yaml, puis
+# Outils de développement → YAML → « Recharger les entités de modèle ».
+
+template:
+  - sensor:
+
+      # LE chiffre qui compte pour le dimensionnement d'une PAC.
+      #
+      # 11 066 h de combustion pour 206 315 démarrages, soit ~3,2 min par
+      # cycle. Une chaudière saine tourne bien plus longtemps à chaque
+      # démarrage ; un cycle aussi court signale une puissance très
+      # surdimensionnée par rapport au besoin réel du bâtiment.
+      #
+      # C'est exactement l'argument qui permet de ne pas reproduire l'erreur
+      # en dimensionnant la pompe à chaleur.
+      - name: "Durée moyenne d'un cycle brûleur"
+        unique_id: vitola_duree_moyenne_cycle
+        unit_of_measurement: "min"
+        state_class: measurement
+        icon: mdi:timer-sand
+        availability: >
+          {{ has_value('sensor.vitola_heures_bruleur')
+             and has_value('sensor.vitola_demarrages_bruleur')
+             and states('sensor.vitola_demarrages_bruleur') | float(0) > 0 }}
+        state: >
+          {{ (states('sensor.vitola_heures_bruleur') | float * 60
+              / states('sensor.vitola_demarrages_bruleur') | float)
+             | round(2) }}
+
+      # Écart entre la température de chaudière et la consigne ECS : dit d'un
+      # coup d'oeil si la chaudière chauffe pour rien.
+      - name: "Écart chaudière / eau chaude"
+        unique_id: vitola_ecart_chaudiere_ecs
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer-minus
+        availability: >
+          {{ has_value('sensor.vitola_temperature_chaudiere')
+             and has_value('sensor.vitola_temperature_eau_chaude') }}
+        state: >
+          {{ (states('sensor.vitola_temperature_chaudiere') | float
+              - states('sensor.vitola_temperature_eau_chaude') | float)
+             | round(1) }}
+
+      # Le mode brut est un code du XML communautaire (unité BA). Traduit.
+      - name: "Mode chaudière"
+        unique_id: vitola_mode_lisible
+        icon: mdi:tune-variant
+        state: >
+          {% set m = states('sensor.vitola_mode_de_fonctionnement') %}
+          {% if   m == 'WW'       %} Eau chaude seule
+          {% elif m == 'RED'      %} Chauffage réduit
+          {% elif m == 'NORM'     %} Chauffage normal
+          {% elif m == 'H+WW'     %} Chauffage + eau chaude
+          {% elif m == 'ABSCHALT' %} Arrêt (hors gel)
+          {% else %} {{ m }}
+          {% endif %}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. VUE DE TABLEAU DE BORD  →  éditeur Lovelace
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Tableau de bord « Tablette » → ⋮ → Modifier → ⋮ → Modifier en YAML,
+# puis coller les entrées ci-dessous à la FIN de la liste des vues.
+#
+# N'utilise que des cartes natives : ni HACS ni carte personnalisée.
+
+views:
+  - title: Chaudière
+    path: chaudiere
+    icon: mdi:water-boiler
+    # Disposition classique (masonry) : elle fonctionne sur toutes les versions
+    # de Home Assistant. Les vues `sections` sont plus jolies mais exigent
+    # 2024.11+ ; si ta version est plus récente, tu pourras convertir depuis
+    # l'interface sans perdre les cartes.
+    cards:
+
+      # ── En un coup d'oeil : la chaudière tourne-t-elle, et pourquoi ? ──
+      - type: entities
+        title: État
+        show_header_toggle: false
+        entities:
+          - entity: binary_sensor.vitola_bruleur
+            name: Brûleur
+          - entity: binary_sensor.vitola_circulateur_m1
+            name: Circulateur M1
+          - entity: sensor.vitola_mode_lisible
+            name: Mode
+          - type: divider
+          - entity: sensor.vitola_consigne_eau_chaude
+            name: Consigne eau chaude
+
+      # ── Températures ──
+      - type: horizontal-stack
+        cards:
+          - type: gauge
+            entity: sensor.vitola_temperature_chaudiere
+            name: Chaudière
+            unit: "°C"
+            min: 0
+            max: 90
+            needle: true
+            severity:
+              green: 0
+              yellow: 65
+              red: 80
+
+          - type: gauge
+            entity: sensor.vitola_temperature_eau_chaude
+            name: Eau chaude
+            unit: "°C"
+            min: 0
+            max: 70
+            needle: true
+            severity:
+              green: 45
+              yellow: 0
+              red: 62
+
+      - type: entities
+        title: Températures
+        show_header_toggle: false
+        entities:
+          - entity: sensor.vitola_temperature_exterieure
+            name: Extérieure
+          - entity: sensor.vitola_temperature_chaudiere
+            name: Chaudière
+          - entity: sensor.vitola_temperature_eau_chaude
+            name: Eau chaude
+          - entity: sensor.vitola_ecart_chaudiere_ecs
+            name: Écart chaudière / ECS
+
+      - type: history-graph
+        title: Températures (24 h)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.vitola_temperature_chaudiere
+            name: Chaudière
+          - entity: sensor.vitola_temperature_eau_chaude
+            name: Eau chaude
+          - entity: sensor.vitola_temperature_exterieure
+            name: Extérieure
+
+      # ── Les compteurs : le dossier énergie ──
+      - type: entities
+        title: Compteurs
+        show_header_toggle: false
+        entities:
+          - entity: sensor.vitola_heures_bruleur
+            name: Heures brûleur
+          - entity: sensor.vitola_demarrages_bruleur
+            name: Démarrages
+          - type: divider
+          # Un cycle de ~3 min confirme un fort surdimensionnement.
+          - entity: sensor.vitola_duree_moyenne_cycle
+            name: Durée moyenne d'un cycle
+
+      - type: history-graph
+        title: Cyclage du brûleur (24 h)
+        hours_to_show: 24
+        entities:
+          - entity: binary_sensor.vitola_bruleur
+            name: Brûleur
+          - entity: binary_sensor.vitola_circulateur_m1
+            name: Circulateur
+
+      # Ces courbes ne s'affichent que parce que les entités déclarent une
+      # state_class : c'est ce qui les fait archiver en statistiques long
+      # terme, au-delà de la purge du recorder (dix jours par défaut).
+      - type: statistics-graph
+        title: Compteurs cumulés (30 jours)
+        days_to_show: 30
+        period: day
+        stat_types:
+          - state
+        entities:
+          - sensor.vitola_heures_bruleur
+          - sensor.vitola_demarrages_bruleur
