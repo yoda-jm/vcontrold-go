@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/vcontrold-go/internal/errors"
+	"github.com/yoda-jm/vcontrold-go/internal/errors"
 	"gopkg.in/yaml.v2"
 )
 

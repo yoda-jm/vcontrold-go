@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 func TestEncodeLittleEndian(t *testing.T) {

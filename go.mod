@@ -1,4 +1,4 @@
-module github.com/yourusername/vcontrold-go
+module github.com/yoda-jm/vcontrold-go
 
 go 1.23.2
 

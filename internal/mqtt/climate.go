@@ -2,9 +2,9 @@
 package mqtt
 
 import (
-	"github.com/yourusername/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
 )
 
 // climatePayload is the discovery message for a thermostat.

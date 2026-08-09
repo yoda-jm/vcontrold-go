@@ -6,7 +6,7 @@
 // tests silence it.
 package viessmann
 
-import "github.com/yourusername/vcontrold-go/internal/logging"
+import "github.com/yoda-jm/vcontrold-go/internal/logging"
 
 // NewDefaultLogger returns the shared logger, tagged for this package.
 func NewDefaultLogger() LoggerInterface {

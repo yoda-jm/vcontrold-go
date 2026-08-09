@@ -4,15 +4,15 @@ package mqtt
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/yourusername/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"strconv"
 	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/viessmann"
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/viessmann"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 // MQTTHook defines a topic to listen to and what action to execute

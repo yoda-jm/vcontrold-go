@@ -2,11 +2,11 @@
 package mqtt
 
 import (
-	"github.com/yourusername/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"strconv"
 	"sync"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
 )
 
 // derivedState remembers the latest numeric value of each alias, so a ratio

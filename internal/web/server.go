@@ -4,7 +4,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/yourusername/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,10 +13,10 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/mqtt"
-	"github.com/yourusername/vcontrold-go/internal/viessmann"
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/mqtt"
+	"github.com/yoda-jm/vcontrold-go/internal/viessmann"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 // Server wraps the HTTP server functionality

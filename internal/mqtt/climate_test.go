@@ -3,7 +3,7 @@ package mqtt
 import (
 	"testing"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
 )
 
 // The hot water thermostat: a real cylinder probe, so a complete entity.

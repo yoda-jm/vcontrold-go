@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 // ValueFormatter handles conversion of raw data to formatted values using XML units

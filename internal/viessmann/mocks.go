@@ -4,7 +4,7 @@ package viessmann
 import (
 	"fmt"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
 )
 
 // MockSerialCommunicator is a mock implementation for testing

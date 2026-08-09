@@ -3,13 +3,13 @@ package viessmann
 
 import (
 	"fmt"
-	"github.com/yourusername/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"sync"
 	"time"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/errors"
-	"github.com/yourusername/vcontrold-go/internal/protocol"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/errors"
+	"github.com/yoda-jm/vcontrold-go/internal/protocol"
 )
 
 // MultiGroupRefresher handles multiple refresh groups with different intervals

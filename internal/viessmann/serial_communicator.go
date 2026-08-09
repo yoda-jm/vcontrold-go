@@ -8,9 +8,9 @@ import (
 
 	"go.bug.st/serial"
 
-	"github.com/yourusername/vcontrold-go/internal/errors"
-	"github.com/yourusername/vcontrold-go/internal/logging"
-	"github.com/yourusername/vcontrold-go/internal/protocol"
+	"github.com/yoda-jm/vcontrold-go/internal/errors"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/protocol"
 )
 
 // SerialCommunicator handles all KW2 protocol serial communication

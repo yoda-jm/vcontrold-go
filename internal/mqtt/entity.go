@@ -4,7 +4,7 @@ package mqtt
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/yourusername/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"strings"
 )
 

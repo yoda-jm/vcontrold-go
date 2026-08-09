@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/errors"
-	"github.com/yourusername/vcontrold-go/internal/protocol"
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/errors"
+	"github.com/yoda-jm/vcontrold-go/internal/protocol"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 // Reader handles communication with the Viessmann heating system

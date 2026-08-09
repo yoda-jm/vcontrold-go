@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 // newTestPublisher builds a publisher that can render payloads without a

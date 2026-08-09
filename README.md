@@ -282,7 +282,13 @@ value is worth more than the value itself.
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
+
+The Go code here is original work. The community XML this depends on
+(`openv/vcontrold`, GPL-2.0) is **fetched at build time by `make deps` and never
+redistributed in this repository**, so its terms do not propagate to this code.
+If you vendor those files into a fork, that changes, and GPL-2.0 applies to what
+you ship.
 
 ## Acknowledgments
 

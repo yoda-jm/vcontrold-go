@@ -3,7 +3,7 @@ package viessmann
 import (
 	"testing"
 
-	"github.com/yourusername/vcontrold-go/internal/protocol"
+	"github.com/yoda-jm/vcontrold-go/internal/protocol"
 )
 
 // TestSerialCommunicator_GetDevice tests device name retrieval

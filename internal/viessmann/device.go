@@ -4,7 +4,7 @@ package viessmann
 import (
 	"fmt"
 
-	"github.com/yourusername/vcontrold-go/internal/errors"
+	"github.com/yoda-jm/vcontrold-go/internal/errors"
 )
 
 // devTypeAddress is where every KW controller reports what it is. The command

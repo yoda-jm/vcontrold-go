@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
 )
 
 // recordingComm captures what would be written to the appliance.

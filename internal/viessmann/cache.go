@@ -2,7 +2,7 @@
 package viessmann
 
 import (
-	"github.com/yourusername/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"sync"
 	"time"
 )

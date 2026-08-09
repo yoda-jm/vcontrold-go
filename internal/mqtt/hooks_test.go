@@ -3,8 +3,8 @@ package mqtt
 import (
 	"testing"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/viessmann"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/viessmann"
 )
 
 func TestHookManager_Creation(t *testing.T) {

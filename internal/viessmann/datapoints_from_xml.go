@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/errors"
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/errors"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 // AddressSpec names an address to read, with an optional length.

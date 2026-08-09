@@ -4,7 +4,7 @@ package viessmann
 import (
 	"time"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
 )
 
 // SerialCommunicatorInterface defines the contract for serial communication

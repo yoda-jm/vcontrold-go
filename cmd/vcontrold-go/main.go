@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yourusername/vcontrold-go/internal/config"
-	"github.com/yourusername/vcontrold-go/internal/errors"
-	"github.com/yourusername/vcontrold-go/internal/logging"
-	"github.com/yourusername/vcontrold-go/internal/viessmann"
-	"github.com/yourusername/vcontrold-go/internal/web"
-	"github.com/yourusername/vcontrold-go/internal/xml"
+	"github.com/yoda-jm/vcontrold-go/internal/config"
+	"github.com/yoda-jm/vcontrold-go/internal/errors"
+	"github.com/yoda-jm/vcontrold-go/internal/logging"
+	"github.com/yoda-jm/vcontrold-go/internal/viessmann"
+	"github.com/yoda-jm/vcontrold-go/internal/web"
+	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
 
 // singleRead describes the -address / -size probing mode.
