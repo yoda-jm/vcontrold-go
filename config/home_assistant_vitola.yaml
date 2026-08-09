@@ -1,28 +1,18 @@
 # Boiler views for the Home Assistant dashboard
 #
-# Exported from what is deployed. The views were installed through the
-# WebSocket API (`lovelace/config/save`), so this file is a reviewable copy
-# rather than a second source that would drift at the first adjustment.
+# Exported from what is deployed. The views are installed through the WebSocket
+# API, so this file is a reviewable copy rather than a second source that would
+# drift at the first adjustment.
 #
-# Nothing to declare in configuration.yaml: every entity comes from the
-# daemon's MQTT discovery. The four `mode_*_aujourd_hui` sensors are
-# history_stats helpers created by scripts/ha_history_stats.py, and
-# `openv:degree_days_monthly` is an external statistic imported by
-# scripts/ha_statistics.py from measured monthly weather data.
+#   chaudiere             current state: gauges, tiles and two history graphs.
+#                         No prose -- it is a dashboard, not a report.
+#   chaudiere-long-terme  monthly bars read from the statistics table, which is
+#                         kept indefinitely, unlike the states table purged
+#                         after purge_keep_days.
 #
-# Two views, because they answer questions on different time scales:
-#
-#   chaudiere             is it behaving right now, and what is the curve doing
-#   chaudiere-long-terme  a 13-month window, which is the only honest way to
-#                         judge a heating change -- and it reads the statistics
-#                         table, kept indefinitely, not the states table purged
-#                         after purge_keep_days
-#
-# Note that history_stats sensors carry no state_class on Home Assistant
-# 2026.8, so they are NOT archived long term. They are convenient for the daily
-# view; the durable record is the numeric mirror
-# sensor.vitola_200_mode_de_fonctionnement_code and the total_increasing
-# run-time counters published by the daemon.
+# Entities come from the daemon's MQTT discovery, except the mode_*_aujourd_hui
+# helpers (scripts/ha_history_stats.py) and openv:degree_days_monthly, an
+# external statistic imported by scripts/ha_statistics.py.
 
 views:
 - type: sections
@@ -36,6 +26,11 @@ views:
     show_state: true
     show_icon: true
     entity: binary_sensor.vitola_200_bruleur
+  - type: entity
+    show_name: false
+    show_state: true
+    show_icon: true
+    entity: sensor.vitola_200_temperature_chaudiere
   - type: entity
     show_name: false
     show_state: true
@@ -55,9 +50,24 @@ views:
   - type: grid
     cards:
     - type: heading
-      heading: Maintenant
+      heading: Pilotage
       heading_style: title
-      icon: mdi:fire
+      icon: mdi:thermostat
+    - type: thermostat
+      entity: climate.vitola_200_eau_chaude_sanitaire
+      features:
+      - type: climate-hvac-modes
+        hvac_modes:
+        - 'off'
+        - heat
+    - type: thermostat
+      entity: climate.vitola_200_chauffage
+  - type: grid
+    cards:
+    - type: heading
+      heading: Températures
+      heading_style: title
+      icon: mdi:thermometer
     - type: gauge
       entity: sensor.vitola_200_temperature_chaudiere
       name: Chaudière
@@ -70,9 +80,8 @@ views:
         yellow: 65
         red: 80
     - type: tile
-      entity: binary_sensor.vitola_200_bruleur
-      name: Brûleur
-      color: red
+      entity: sensor.vitola_200_temperature_eau_chaude
+      name: Eau chaude
     - type: tile
       entity: sensor.vitola_200_temperature_de_depart
       name: Départ
@@ -80,74 +89,83 @@ views:
       entity: sensor.vitola_200_temperature_de_retour
       name: Retour
     - type: tile
-      entity: sensor.vitola_200_mode_de_fonctionnement
-      name: Mode
+      entity: sensor.vitola_200_temperature_exterieure
+      name: Extérieure
+      color: cyan
+    - type: history-graph
+      title: 24 heures
+      hours_to_show: 24
+      entities:
+      - entity: sensor.vitola_200_temperature_chaudiere
+        name: Chaudière
+      - entity: sensor.vitola_200_temperature_eau_chaude
+        name: Eau chaude
+      - entity: sensor.vitola_200_temperature_de_depart
+        name: Départ
+      - entity: sensor.vitola_200_temperature_de_retour
+        name: Retour
+      - entity: sensor.vitola_200_temperature_exterieure
+        name: Extérieure
+  - type: grid
+    cards:
+    - type: heading
+      heading: Organes
+      heading_style: title
+      icon: mdi:pump
+    - type: tile
+      entity: binary_sensor.vitola_200_bruleur
+      name: Brûleur
+      color: red
+    - type: tile
+      entity: binary_sensor.vitola_200_circulateur_m1
+      name: Circulateur M1
+      color: blue
+    - type: tile
+      entity: binary_sensor.vitola_200_pompe_de_charge_ballon
+      name: Charge ballon
+      color: blue
+    - type: tile
+      entity: binary_sensor.vitola_200_pompe_de_bouclage
+      name: Bouclage ECS
+      color: blue
     - type: tile
       entity: binary_sensor.vitola_200_defaut
       name: Défaut
       color: red
-  - type: grid
-    cards:
-    - type: heading
-      heading: Courbe de chauffe
-      heading_style: title
-      icon: mdi:chart-bell-curve-cumulative
-    - type: entities
-      show_header_toggle: false
+    - type: history-graph
+      title: Marche sur 24 h
+      hours_to_show: 24
       entities:
-      - entity: sensor.vitola_200_pente_de_la_courbe_de_chauffe
-        name: Pente
-      - entity: sensor.vitola_200_niveau_de_la_courbe_de_chauffe
-        name: Niveau
-      - entity: sensor.vitola_200_consigne_ambiance_normale
-        name: Ambiance normale
-      - entity: sensor.vitola_200_consigne_ambiance_reduite
-        name: Ambiance réduite
-      - entity: sensor.vitola_200_consigne_reception
-        name: Consigne réception
-    - type: markdown
-      content: '
-
-        {%- set slope = states(''sensor.vitola_200_pente_de_la_courbe_de_chauffe'') | float(0) -%}
-
-        {%- set level = states(''sensor.vitola_200_niveau_de_la_courbe_de_chauffe'') | float(0) -%}
-
-        {%- set room  = states(''sensor.vitola_200_consigne_ambiance_normale'') | float(0) -%}
-
-        ### Courbe de chauffe
-
-
-        Pente **{{ slope }}** · niveau **{{ level }}** · ambiance de référence **{{ room }} °C**
-
-
-        | Extérieur | Départ calculé |
-
-        |---:|---:|
-
-        {% for out in [-10, -5, 0, 5, 10] -%}
-
-        {%- set d = out - room -%}
-
-        {%- set flow = room + level - slope * d * (1.4347 + 0.021 * d + 0.0002479 * d * d) -%}
-
-        | {{ out }} °C | **{{ flow | round(1) }} °C** |
-
-        {% endfor %}
-
-
-        *La consigne d''ambiance décale toute la courbe. Les vannes thermostatiques
-
-        visent 19–20 °C : chaque degré d''écart avec la référence ci-dessus est un excès
-
-        de température de départ à toutes les températures extérieures.*
-
-        '
+      - entity: binary_sensor.vitola_200_bruleur
+        name: Brûleur
+      - entity: binary_sensor.vitola_200_circulateur_m1
+        name: Circulateur
+      - entity: binary_sensor.vitola_200_pompe_de_charge_ballon
+        name: Charge ballon
+      - entity: binary_sensor.vitola_200_pompe_de_bouclage
+        name: Bouclage
   - type: grid
     cards:
     - type: heading
-      heading: Temps de marche
+      heading: Compteurs
       heading_style: title
-      icon: mdi:timer-outline
+      icon: mdi:counter
+    - type: tile
+      entity: sensor.vitola_200_heures_bruleur
+      name: Heures brûleur
+      color: amber
+    - type: tile
+      entity: sensor.vitola_200_demarrages_bruleur
+      name: Démarrages
+      color: amber
+    - type: tile
+      entity: sensor.vitola_200_duree_moyenne_d_un_cycle
+      name: Cycle moyen
+      color: deep-orange
+    - type: tile
+      entity: sensor.vitola_200_heures_pompe_de_bouclage
+      name: Heures bouclage
+      color: blue
     - type: statistics-graph
       title: Heures par jour (30 jours)
       days_to_show: 30
@@ -159,94 +177,47 @@ views:
       - entity: sensor.vitola_200_heures_bruleur
         name: Brûleur
       - entity: sensor.vitola_200_heures_pompe_de_bouclage
-        name: Bouclage ECS
+        name: Bouclage
       - entity: sensor.vitola_200_heures_circulateur_m1
-        name: Circulateur M1
-    - type: entities
-      show_header_toggle: false
-      entities:
-      - entity: sensor.vitola_200_heures_pompe_de_bouclage
-        name: Bouclage ECS, cumul
-      - entity: sensor.vitola_200_heures_circulateur_m1
-        name: Circulateur M1, cumul
-      - entity: sensor.vitola_200_heures_pompe_de_charge_ballon
-        name: Charge ballon, cumul
+        name: Circulateur
   - type: grid
     cards:
     - type: heading
-      heading: Cyclage
+      heading: Réglages
       heading_style: title
-      icon: mdi:sine-wave
+      icon: mdi:tune
     - type: tile
-      entity: sensor.vitola_200_duree_moyenne_d_un_cycle
-      name: Durée moyenne d'un cycle
-      color: deep-orange
+      entity: sensor.vitola_200_mode_de_fonctionnement
+      name: Mode
     - type: tile
-      entity: sensor.vitola_200_demarrages_bruleur
-      name: Démarrages, cumul
-    - type: statistics-graph
-      title: Démarrages par jour (30 jours)
-      days_to_show: 30
-      period: day
-      chart_type: bar
-      stat_types:
-      - change
-      entities:
-      - entity: sensor.vitola_200_demarrages_bruleur
-        name: Démarrages
-    - type: markdown
-      content: 'Un cycle moyen de **3,2 min** sur une chaudière fonte 22 kW mono-allure dans une maison
-        qui demande bien moins : c''est du court-cycle, et la perte de rendement associée est connue.
-        C''est aussi l''argument à opposer à un dimensionnement de PAC calqué sur la puissance actuelle.'
-  - type: grid
-    cards:
-    - type: heading
-      heading: Eau chaude sanitaire
-      heading_style: title
-      icon: mdi:water-thermometer
-    - type: thermostat
-      entity: climate.vitola_200_eau_chaude_sanitaire
-    - type: entities
-      show_header_toggle: false
-      entities:
-      - entity: sensor.vitola_200_temperature_eau_chaude
-        name: Ballon, mesuré
-      - entity: sensor.vitola_200_consigne_eau_chaude
-        name: Consigne
-      - entity: binary_sensor.vitola_200_pompe_de_charge_ballon
-        name: Pompe de charge
-      - entity: binary_sensor.vitola_200_pompe_de_bouclage
-        name: Pompe de bouclage
-    - type: history-graph
-      title: Ballon et consigne (7 jours)
-      hours_to_show: 168
-      entities:
-      - entity: sensor.vitola_200_temperature_eau_chaude
-        name: Mesuré
-      - entity: sensor.vitola_200_consigne_eau_chaude
-        name: Consigne
-    - type: markdown
-      content: 'Dépassement persistant : le ballon se stabilise **au-dessus** de la consigne. À surveiller
-        avec les heures de bouclage ci-dessus — un bouclage permanent réchauffe le ballon par le retour
-        et coûte 1300 à 2600 kWh/an.'
+      entity: sensor.vitola_200_consigne_chaudiere
+      name: Consigne chaudière
+    - type: tile
+      entity: sensor.vitola_200_pente_de_la_courbe_de_chauffe
+      name: Pente
+    - type: tile
+      entity: sensor.vitola_200_niveau_de_la_courbe_de_chauffe
+      name: Niveau
+    - type: tile
+      entity: sensor.vitola_200_consigne_ambiance_normale
+      name: Ambiance normale
+    - type: tile
+      entity: sensor.vitola_200_consigne_ambiance_reduite
+      name: Ambiance réduite
 - type: sections
   max_columns: 3
-  title: Chaudière — long terme
+  title: Chaudière — historique
   path: chaudiere-long-terme
   icon: mdi:chart-timeline-variant
   sections:
   - type: grid
     cards:
     - type: heading
-      heading: Consommation de chauffe
+      heading: Par mois
       heading_style: title
       icon: mdi:calendar-range
-    - type: markdown
-      content: 'Toutes les courbes de cette page lisent la table `statistics`, conservée indéfiniment,
-        et non la table `states` purgée à 10 jours. La fenêtre par défaut est de **12 mois** : un changement
-        de courbe de chauffe ou d''isolation ne se juge pas sur 24 h.'
     - type: statistics-graph
-      title: Heures brûleur par mois (13 mois)
+      title: Heures brûleur
       days_to_show: 400
       period: month
       chart_type: bar
@@ -256,7 +227,7 @@ views:
       - entity: sensor.vitola_200_heures_bruleur
         name: Heures brûleur
     - type: statistics-graph
-      title: Démarrages par mois (13 mois)
+      title: Démarrages
       days_to_show: 400
       period: month
       chart_type: bar
@@ -265,14 +236,8 @@ views:
       entities:
       - entity: sensor.vitola_200_demarrages_bruleur
         name: Démarrages
-  - type: grid
-    cards:
-    - type: heading
-      heading: Rigueur du climat
-      heading_style: title
-      icon: mdi:snowflake-thermometer
     - type: statistics-graph
-      title: Degrés-jours par mois
+      title: Degrés-jours (base 18)
       days_to_show: 400
       period: month
       chart_type: bar
@@ -280,23 +245,33 @@ views:
       - change
       entities:
       - entity: openv:degree_days_monthly
-        name: DJU base 18
-    - type: markdown
-      content: '### Lire les deux ensemble
-
-
-        Les heures brûleur d''un mois doivent être rapportées à sa rigueur, pas au calendrier. Un hiver
-        doux déplace le point **le long** de la droite heures/DJU ; une meilleure isolation, ou une courbe
-        de chauffe corrigée, en change la **pente**.
-
-
-        Comparer deux mois sans regarder les DJU est la façon classique de se convaincre qu''une amélioration
-        a marché.
-
-
-        *Home Assistant n''a pas de nuage de points en natif : les deux séries sont donc côte à côte,
-        à la même échelle mensuelle. Le rapport heures/DJU se lit en divisant les deux barres d''un même
-        mois.*'
+        name: DJU
+  - type: grid
+    cards:
+    - type: heading
+      heading: Eau chaude et bouclage
+      heading_style: title
+      icon: mdi:water-thermometer
+    - type: statistics-graph
+      title: Heures de bouclage par mois
+      days_to_show: 400
+      period: month
+      chart_type: bar
+      stat_types:
+      - change
+      entities:
+      - entity: sensor.vitola_200_heures_pompe_de_bouclage
+        name: Bouclage
+    - type: history-graph
+      title: Ballon et consigne (7 jours)
+      hours_to_show: 168
+      entities:
+      - entity: sensor.vitola_200_temperature_eau_chaude
+        name: Ballon
+      - entity: sensor.vitola_200_consigne_eau_chaude
+        name: Consigne
+      - entity: sensor.vitola_200_consigne_chaudiere
+        name: Consigne chaudière
   - type: grid
     cards:
     - type: heading
@@ -304,7 +279,7 @@ views:
       heading_style: title
       icon: mdi:calendar-check
     - type: statistics-graph
-      title: Mode de fonctionnement (code, 13 mois)
+      title: Mode (0 WW · 1 RED · 2 NORM · 4 H+WW · 5 arrêt)
       days_to_show: 400
       period: day
       stat_types:
@@ -314,15 +289,25 @@ views:
       - entity: sensor.vitola_200_mode_de_fonctionnement_code
         name: Mode
     - type: markdown
-      content: '`0` WW · `1` RED · `2` NORM · `3`/`4` H+WW · `5` ARRÊT
+      content: '{%- set slope = states(''sensor.vitola_200_pente_de_la_courbe_de_chauffe'') | float(0)
+        -%}
+
+        {%- set level = states(''sensor.vitola_200_niveau_de_la_courbe_de_chauffe'') | float(0) -%}
+
+        {%- set room  = states(''sensor.vitola_200_consigne_ambiance_normale'') | float(0) -%}
+
+        Pente {{ slope }} · niveau {{ level }} · référence {{ room }} °C
 
 
-        Le passage de `0` à une valeur supérieure date le début de la saison de chauffe, le retour à `0`
-        sa fin. Les codes viennent de l''unité `BA` de `vcontrold.xml`, pas d''une correspondance inventée.
+        | Extérieur | −10 | −5 | 0 | +5 | +10 |
 
+        |---|---|---|---|---|---|
 
-        Le capteur texte correspondant n''a **pas** de mémoire au-delà de 10 jours : c''est ce miroir
-        numérique qui porte l''historique.'
+        | Départ | {%- for out in [-10, -5, 0, 5, 10] -%}{%- set d = out - room -%}{%- set flow = room
+        + level - slope * d * (1.4347 + 0.021 * d + 0.0002479 * d * d) -%} **{{ flow | round(0) | int
+        }}** |{%- endfor %}
+
+        '
     - type: entities
       title: Aujourd'hui
       show_header_toggle: false
@@ -333,29 +318,3 @@ views:
         name: Chauffage réduit
       - entity: sensor.vitola_200_mode_ww_aujourd_hui
         name: Eau chaude seule
-      - entity: sensor.vitola_200_mode_abschalt_aujourd_hui
-        name: Arrêt
-  - type: grid
-    cards:
-    - type: heading
-      heading: Bouclage ECS
-      heading_style: title
-      icon: mdi:pump
-    - type: statistics-graph
-      title: Heures de bouclage par mois
-      days_to_show: 400
-      period: month
-      chart_type: bar
-      stat_types:
-      - change
-      entities:
-      - entity: sensor.vitola_200_heures_pompe_de_bouclage
-        name: Bouclage ECS
-    - type: markdown
-      content: 'C''est la courbe qui tranchera l''hypothèse : un bouclage tournant en permanence coûte
-        **1300 à 2600 kWh/an** s''il est mal calorifugé, à rapprocher des **3250 kWh/an** de pertes ECS
-        inexpliquées mesurées au compteur gaz.
-
-
-        Si les barres approchent 730 h/mois, le bouclage tourne 24/7 et le remède est une programmation
-        horaire, pas des travaux.'
