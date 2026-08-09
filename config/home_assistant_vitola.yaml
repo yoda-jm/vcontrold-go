@@ -1,18 +1,17 @@
-# Boiler views for the Home Assistant dashboard
+# Boiler view for the Home Assistant dashboard
 #
-# Exported from what is deployed. The views are installed through the WebSocket
-# API, so this file is a reviewable copy rather than a second source that would
-# drift at the first adjustment.
+# Exported from what is deployed. Installed through the WebSocket API, so this
+# file is a reviewable copy rather than a second source that would drift.
 #
-#   chaudiere             current state: gauges, tiles and two history graphs.
-#                         No prose -- it is a dashboard, not a report.
-#   chaudiere-long-terme  monthly bars read from the statistics table, which is
-#                         kept indefinitely, unlike the states table purged
-#                         after purge_keep_days.
+# One view, no prose. Current state at the top -- gauge, tiles, two history
+# graphs -- and monthly bars at the bottom. The monthly charts read the
+# statistics table, kept indefinitely, rather than the states table purged
+# after purge_keep_days; each card carries its own days_to_show, so mixing
+# ranges on one page needs no separate tab.
 #
-# Entities come from the daemon's MQTT discovery, except the mode_*_aujourd_hui
-# helpers (scripts/ha_history_stats.py) and openv:degree_days_monthly, an
-# external statistic imported by scripts/ha_statistics.py.
+# Entities come from the daemon's MQTT discovery, except
+# openv:degree_days_monthly, an external statistic imported by
+# scripts/ha_statistics.py from measured monthly weather.
 
 views:
 - type: sections
@@ -204,20 +203,14 @@ views:
     - type: tile
       entity: sensor.vitola_200_consigne_ambiance_reduite
       name: Ambiance réduite
-- type: sections
-  max_columns: 3
-  title: Chaudière — historique
-  path: chaudiere-long-terme
-  icon: mdi:chart-timeline-variant
-  sections:
   - type: grid
     cards:
     - type: heading
-      heading: Par mois
+      heading: Historique
       heading_style: title
-      icon: mdi:calendar-range
+      icon: mdi:chart-timeline-variant
     - type: statistics-graph
-      title: Heures brûleur
+      title: Heures brûleur par mois
       days_to_show: 400
       period: month
       chart_type: bar
@@ -226,32 +219,6 @@ views:
       entities:
       - entity: sensor.vitola_200_heures_bruleur
         name: Heures brûleur
-    - type: statistics-graph
-      title: Démarrages
-      days_to_show: 400
-      period: month
-      chart_type: bar
-      stat_types:
-      - change
-      entities:
-      - entity: sensor.vitola_200_demarrages_bruleur
-        name: Démarrages
-    - type: statistics-graph
-      title: Degrés-jours (base 18)
-      days_to_show: 400
-      period: month
-      chart_type: bar
-      stat_types:
-      - change
-      entities:
-      - entity: openv:degree_days_monthly
-        name: DJU
-  - type: grid
-    cards:
-    - type: heading
-      heading: Eau chaude et bouclage
-      heading_style: title
-      icon: mdi:water-thermometer
     - type: statistics-graph
       title: Heures de bouclage par mois
       days_to_show: 400
@@ -262,59 +229,13 @@ views:
       entities:
       - entity: sensor.vitola_200_heures_pompe_de_bouclage
         name: Bouclage
-    - type: history-graph
-      title: Ballon et consigne (7 jours)
-      hours_to_show: 168
-      entities:
-      - entity: sensor.vitola_200_temperature_eau_chaude
-        name: Ballon
-      - entity: sensor.vitola_200_consigne_eau_chaude
-        name: Consigne
-      - entity: sensor.vitola_200_consigne_chaudiere
-        name: Consigne chaudière
-  - type: grid
-    cards:
-    - type: heading
-      heading: Saison de chauffe
-      heading_style: title
-      icon: mdi:calendar-check
     - type: statistics-graph
-      title: Mode (0 WW · 1 RED · 2 NORM · 4 H+WW · 5 arrêt)
+      title: Degrés-jours par mois
       days_to_show: 400
-      period: day
+      period: month
+      chart_type: bar
       stat_types:
-      - min
-      - max
+      - change
       entities:
-      - entity: sensor.vitola_200_mode_de_fonctionnement_code
-        name: Mode
-    - type: markdown
-      content: '{%- set slope = states(''sensor.vitola_200_pente_de_la_courbe_de_chauffe'') | float(0)
-        -%}
-
-        {%- set level = states(''sensor.vitola_200_niveau_de_la_courbe_de_chauffe'') | float(0) -%}
-
-        {%- set room  = states(''sensor.vitola_200_consigne_ambiance_normale'') | float(0) -%}
-
-        Pente {{ slope }} · niveau {{ level }} · référence {{ room }} °C
-
-
-        | Extérieur | −10 | −5 | 0 | +5 | +10 |
-
-        |---|---|---|---|---|---|
-
-        | Départ | {%- for out in [-10, -5, 0, 5, 10] -%}{%- set d = out - room -%}{%- set flow = room
-        + level - slope * d * (1.4347 + 0.021 * d + 0.0002479 * d * d) -%} **{{ flow | round(0) | int
-        }}** |{%- endfor %}
-
-        '
-    - type: entities
-      title: Aujourd'hui
-      show_header_toggle: false
-      entities:
-      - entity: sensor.vitola_200_mode_norm_aujourd_hui
-        name: Chauffage normal
-      - entity: sensor.vitola_200_mode_red_aujourd_hui
-        name: Chauffage réduit
-      - entity: sensor.vitola_200_mode_ww_aujourd_hui
-        name: Eau chaude seule
+      - entity: openv:degree_days_monthly
+        name: DJU base 18
