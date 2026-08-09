@@ -37,11 +37,6 @@ func (vf *ValueFormatter) FormatValueWithAllSources(rawValue interface{}, dataTy
 		return "ERROR"
 	}
 
-	// Special case for 0x08A7 - Burner Hours (CounterS type)
-	if address == 0x08A7 {
-		return vf.formatBurnerHours(data)
-	}
-
 	// Get the best unit type using all sources
 	unitType, foundInXML := xml.GetBestUnitForParameter(address, paramName)
 	if unitType == "" {
@@ -190,6 +185,13 @@ func (vf *ValueFormatter) formatConvertedValue(convertedValue float64, entity, u
 	if entity != "" {
 		if strings.Contains(unitType, "Temperatur") {
 			return fmt.Sprintf("%.1f %s", convertedValue, entity)
+		} else if unitType == "CounterS" {
+			// Seconds converted to hours by the XML (CS is V/3600), so the
+			// underlying resolution is one second. Rounding to 0.1 h would be a
+			// six-minute step -- about the length of a whole hot-water cycle,
+			// which would make every single-cycle measurement meaningless.
+			// Four decimals keeps roughly one third of a second.
+			return fmt.Sprintf("%.4f h", convertedValue)
 		} else if unitType == "Brenner Stunden" {
 			return fmt.Sprintf("%.1f h", convertedValue)
 		} else if unitType == "Prozent" {
@@ -212,29 +214,4 @@ func (vf *ValueFormatter) addXMLStatusAnnotation(formattedValue string, foundInX
 		return formattedValue + " (not in XML)"
 	}
 	return formattedValue
-}
-
-// formatBurnerHours formats the 0x08A7 address as burner hours (CounterS type)
-// Handles both 2-byte and 4-byte data as configured in parameter file
-func (vf *ValueFormatter) formatBurnerHours(data []byte) string {
-	var rawValue uint32
-
-	switch len(data) {
-	case 2:
-		// 2-byte configuration - convert to uint16 then to uint32
-		rawValue = uint32(data[0]) | (uint32(data[1]) << 8)
-	case 4:
-		// 4-byte configuration (XML specification) - convert to uint32
-		rawValue = uint32(data[0]) |
-			(uint32(data[1]) << 8) |
-			(uint32(data[2]) << 16) |
-			(uint32(data[3]) << 24)
-	default:
-		return fmt.Sprintf("Invalid data length for burner hours: %d bytes (expected 2 or 4)", len(data))
-	}
-
-	// Apply CounterS conversion: divide by 3600 to get hours
-	hours := float64(rawValue) / 3600.0
-
-	return fmt.Sprintf("%.1f h", hours)
 }

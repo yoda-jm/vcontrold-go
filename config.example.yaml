@@ -50,6 +50,7 @@ refresh_groups:
     addresses:
       - "0x08A7"   # burner hours
       - "0x088A"   # burner starts
+      - "0x08AB"   # burner hours, stage 2
       - "0x6300"   # hot water setpoint
       - "0x2306"   # normal room setpoint M1
       - "0x2307"   # reduced room setpoint M1
@@ -79,6 +80,14 @@ mqtt:
       # A corrupt frame that passes this bound is indistinguishable from truth;
       # one that does not is refused before it can become permanent history.
       max_increase_per_hour: 1.05
+    # Stage 2 of the burner. The appliance is sold as 22/24 kW, which suggests
+    # two firing rates, and hours spent on stage 2 are not counted by stage 1.
+    # Any efficiency figure has to be computed on the sum of both.
+    - address: "0x08AB"
+      alias: getBrennerStunden2
+      friendly_name: Heures brûleur allure 2
+      max_increase_per_hour: 1.05
+
     - address: "0x088A"
       alias: getBrennerStarts
       friendly_name: Démarrages brûleur
