@@ -4,38 +4,111 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # Weekly, because most of what can break here is upstream: the community XML
+  # is pinned but fetched, and a broken fetch should surface before someone
+  # hits it mid-change.
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Several tests read the community vito.xml and skip without it. Skipping
+  # silently would hollow out the run, so the fetch is a prerequisite, not a
+  # nicety.
+  DEPS_REQUIRED: "1"
+
 jobs:
-  check:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install pinned tools
+        run: make tools
+      - name: gofmt, go vet, staticcheck
+        run: make lint
 
-      # Several tests read the community vito.xml and skip without it, which
-      # would quietly hollow out the run. Fetching it keeps them meaningful.
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The version in go.mod is the floor; the newest release is what most
+        # contributors will actually have installed.
+        go: ["1.23", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
       - name: Fetch community XML
         run: make deps
 
-      - name: Lint
-        run: |
-          make tools
-          make lint
-
       # The daemon drives one serial port from several refresh goroutines, so a
-      # data race is a realistic failure, not a theoretical one.
-      - name: Test (race detector)
+      # data race is a realistic failure rather than a theoretical one.
+      - name: Test with race detector
         run: make test-race
 
       - name: Coverage
         run: make cover
 
-      - name: Build
-        run: make build
+      - name: Upload coverage
+        if: matrix.go == 'stable'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The target is a Linux box, but the tool should cross-compile cleanly:
+        # a build that only works on the author's machine is a trap for the
+        # first contributor.
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: arm
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -o /dev/null ./cmd/vcontrold-go
+
+  # The example configuration is documentation people copy. If it stops parsing,
+  # the first thing a newcomer does fails.
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the example configuration and the overrides
+        run: |
+          python3 -c "import yaml,sys; yaml.safe_load(open('config.example.yaml')); print('config.example.yaml parses')"
+          python3 -c "import xml.etree.ElementTree as ET,glob;
+          [ET.parse(f) for f in glob.glob('overrides/*.xml')];
+          print('overrides parse')"

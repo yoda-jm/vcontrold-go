@@ -2,11 +2,11 @@
 package web
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -18,6 +18,13 @@ import (
 	"github.com/yoda-jm/vcontrold-go/internal/viessmann"
 	"github.com/yoda-jm/vcontrold-go/internal/xml"
 )
+
+// indexHTML is compiled into the binary. Reading it from disk meant the web UI
+// returned 500 anywhere but a source checkout — including on the deployment
+// target, where only the binary and its configuration are shipped.
+//
+//go:embed simple.html
+var indexHTML []byte
 
 // Server wraps the HTTP server functionality
 type Server struct {
@@ -578,17 +585,11 @@ func (s *Server) getMqttStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 // indexHandler serves the main web interface
 func (s *Server) indexHandler(w http.ResponseWriter, r *http.Request) {
-	// Read the simple HTML template
-	htmlBytes, err := os.ReadFile("internal/web/simple.html")
-	if err != nil {
-		logging.Info("Could not read simple.html template: %v", err)
-		http.Error(w, "Template not found", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write(htmlBytes)
+	if _, err := w.Write(indexHTML); err != nil {
+		logging.Warn("Failed to write the index page: %v", err)
+	}
 }
 
 // broadcastCacheEvent broadcasts cache events to all connected SSE clients

@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Go dependencies. Few and boring here, which is deliberate: paho for MQTT,
+  # go.bug.st/serial for the port, gorilla/mux and yaml.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
