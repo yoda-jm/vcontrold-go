@@ -65,6 +65,22 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 		if err := s.mqttPublisher.PublishDerivedDiscovery(cfg.YamlConfig.Derived); err != nil {
 			logging.Warn("MQTT derived discovery not published: %v", err)
 		}
+
+		// A text sensor has no long-term history in Home Assistant, so the
+		// datapoints that matter historically are mirrored as numbers.
+		if err := s.mqttPublisher.PublishRawMirrorDiscovery(); err != nil {
+			logging.Warn("MQTT raw mirror discovery not published: %v", err)
+		}
+
+		// Run-time counters for the on/off datapoints, whose binary sensors
+		// are purged with the states table.
+		statePath := cfg.YamlConfig.RuntimeStateFile
+		if statePath == "" {
+			statePath = mqtt.DefaultRuntimeStatePath(cfg.YamlConfigFile)
+		}
+		if err := s.mqttPublisher.PublishRuntimeDiscovery(cfg.YamlConfig.Runtimes, statePath); err != nil {
+			logging.Warn("MQTT run-time discovery not published: %v", err)
+		}
 	}
 
 	// Initialize MQTT hook manager

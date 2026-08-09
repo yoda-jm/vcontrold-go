@@ -32,5 +32,28 @@
       <description>Ermittle die Brennerstarts</description>
     </command>
 
+
+    <!--
+      Return temperature. Absent from the KW profile of vito.xml, where
+      getTempRueck carries an address only for device ID 2053. The 300 profile
+      declares getTempRL17A at 080A, len 2, unit UT, and that address answers
+      on this appliance.
+
+      Observed on 2026-08-09: 20.0 C, while the flow (080C) read 27.7 C and the
+      boiler (0802) 65.9 C. A plausible ordering for a circuit at rest in
+      August, and crucially not one of the reserved values: an absent sensor
+      would answer FF FF or FF 7F, as the mixers at 254C and 354C do.
+
+      Inferred rather than confirmed: nothing here proves 080A is the return
+      sensor rather than another probe that happens to answer. It is published
+      as such because the 300 profile says so and the reading is consistent.
+    -->
+    <command name="getTempRL17A" protocmd="getaddr">
+      <addr>080A</addr>
+      <len>2</len>
+      <unit>UT</unit>
+      <description>Ermittle die Ruecklauftemperatur</description>
+    </command>
+
   </commands>
 </vito>

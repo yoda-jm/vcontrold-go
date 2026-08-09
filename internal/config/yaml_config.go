@@ -66,6 +66,30 @@ type YamlConfig struct {
 
 	// Values computed from two published readings.
 	Derived []MQTTDerivedConfig `yaml:"mqtt_derived" json:"mqtt_derived"`
+
+	// Cumulative run-time counters built from on/off datapoints.
+	Runtimes []MQTTRuntimeConfig `yaml:"mqtt_runtime" json:"mqtt_runtime"`
+
+	// Where the run-time totals are persisted. Empty places the file beside
+	// the configuration.
+	RuntimeStateFile string `yaml:"runtime_state_file,omitempty" json:"runtime_state_file,omitempty"`
+}
+
+// MQTTRuntimeConfig turns an on/off datapoint into a cumulative run-time
+// counter, in hours.
+//
+// Home Assistant keeps long-term statistics only for sensors with a
+// state_class. A binary_sensor is purged with the states table, so its run time
+// would never accumulate — which is precisely the history needed to decide
+// whether a recirculation pump is running around the clock.
+type MQTTRuntimeConfig struct {
+	// SourceAlias is the 0/1 datapoint to integrate, e.g. getPumpeStatusZirku.
+	SourceAlias string `yaml:"source_alias" json:"source_alias"`
+
+	// Alias is the topic the accumulated hours are published on.
+	Alias        string `yaml:"alias" json:"alias"`
+	FriendlyName string `yaml:"friendly_name" json:"friendly_name"`
+	Icon         string `yaml:"icon,omitempty" json:"icon,omitempty"`
 }
 
 // MQTTDerivedConfig describes a ratio between two already-published readings.
@@ -172,10 +196,30 @@ type MQTTAddress struct {
 	// Component picks the Home Assistant entity type: "sensor" (default) or
 	// "binary_sensor". A 0/1 state — burner, pump — reads far better as a
 	// binary sensor: "Running / Not running" rather than a bare "0".
-	Icon       string `yaml:"icon,omitempty" json:"icon,omitempty"`
-	Component  string `yaml:"component,omitempty" json:"component,omitempty"`
-	PayloadOn  string `yaml:"payload_on,omitempty" json:"payload_on,omitempty"`
-	PayloadOff string `yaml:"payload_off,omitempty" json:"payload_off,omitempty"`
+	Icon      string `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Component string `yaml:"component,omitempty" json:"component,omitempty"`
+
+	// MaxIncreasePerHour bounds how fast a monotonic counter may rise. The KW
+	// protocol has no checksum, so a disturbed frame can yield a well-formed
+	// but wrong number; published to a total_increasing entity that is
+	// permanent damage. Zero disables the check.
+	//
+	// The bounds are physical, not guessed: burner hours cannot rise faster
+	// than one hour per hour of wall time.
+	MaxIncreasePerHour float64 `yaml:"max_increase_per_hour,omitempty" json:"max_increase_per_hour,omitempty"`
+
+	// RawAlias publishes the raw protocol value as a number alongside the
+	// decoded text. A text sensor has no memory in Home Assistant beyond
+	// purge_keep_days; if the value matters historically it must also exist as
+	// a number.
+	RawAlias        string `yaml:"raw_alias,omitempty" json:"raw_alias,omitempty"`
+	RawFriendlyName string `yaml:"raw_friendly_name,omitempty" json:"raw_friendly_name,omitempty"`
+
+	// Options lists the possible values of an enum sensor. Cosmetic — it makes
+	// the UI and the logbook readable — and requires device_class: enum.
+	Options    []string `yaml:"options,omitempty" json:"options,omitempty"`
+	PayloadOn  string   `yaml:"payload_on,omitempty" json:"payload_on,omitempty"`
+	PayloadOff string   `yaml:"payload_off,omitempty" json:"payload_off,omitempty"`
 }
 
 // MQTTHookConfig defines a hook configuration in YAML

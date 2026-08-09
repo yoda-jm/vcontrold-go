@@ -34,6 +34,7 @@ refresh_groups:
       - "0x0804"   # hot water temperature
       - "0x080C"   # flow temperature (the only flow probe present)
       - "0x5502"   # boiler setpoint
+      - "0x080A"   # return temperature
       - "0x551E"   # burner state
       - "0x2906"   # circulator M1 state
       - "0x0845"   # cylinder charge pump
@@ -56,6 +57,7 @@ refresh_groups:
       - "0x2305"   # heating curve slope
       - "0x2302"   # eco mode
       - "0x2303"   # party mode
+      - "0x2308"   # party setpoint
 
 mqtt:
   enabled: true
@@ -73,9 +75,17 @@ mqtt:
     - address: "0x08A7"
       alias: getBrennerStunden1
       friendly_name: Heures brûleur
+      # Burner hours cannot rise faster than one hour per hour of wall time.
+      # A corrupt frame that passes this bound is indistinguishable from truth;
+      # one that does not is refused before it can become permanent history.
+      max_increase_per_hour: 1.05
     - address: "0x088A"
       alias: getBrennerStarts
       friendly_name: Démarrages brûleur
+      # Observed cycling is about 31 starts a day. 120 an hour is far beyond
+      # anything the appliance can do, and still catches the truncated-counter
+      # signature that read 9707 instead of 206315.
+      max_increase_per_hour: 120
 
     # --- Temperatures --------------------------------------------------------
     - address: "0x0800"
@@ -112,9 +122,18 @@ mqtt:
       friendly_name: Circulateur M1
       component: binary_sensor
       device_class: running
+    # A text sensor has no memory in Home Assistant beyond purge_keep_days.
+    # The mode is the reference every consumption analysis is calibrated
+    # against — when the heating season actually started and stopped — so it
+    # also has to exist as a number. raw_alias publishes the protocol byte
+    # itself, straight from vcontrold.xml, rather than an invented mapping.
     - address: "0x2301"
       alias: getBetriebArtM1
       friendly_name: Mode de fonctionnement
+      device_class: enum
+      options: ["WW", "RED", "NORM", "H+WW", "ABSCHALT"]
+      raw_alias: getBetriebArtM1_code
+      raw_friendly_name: Mode de fonctionnement (code)
 
     # --- Additions -----------------------------------------------------------
     - address: "0x080C"
@@ -123,6 +142,22 @@ mqtt:
     - address: "0x5502"
       alias: getTempKsoll
       friendly_name: Consigne chaudière
+    # Return temperature. The sensor is present on this installation: 0x080A
+    # reads a plausible value rather than a reserved one. Its address comes
+    # from the 300 profile, so it is declared in overrides/ rather than
+    # hardcoded. Needed for the delta-T across the circuit and to watch the
+    # condensation risk on a non-condensing cast-iron boiler.
+    - address: "0x080A"
+      alias: getTempRL
+      friendly_name: Température de retour
+    # Party-mode setpoint: a manual override here would otherwise be misread as
+    # a change in the building's behaviour.
+    - address: "0x2308"
+      alias: getTempPartyM1
+      friendly_name: Consigne réception
+      unit: "°C"
+      device_class: temperature
+      state_class: measurement
     - address: "0x2306"
       alias: getTempRaumNorSollM1
       friendly_name: Consigne ambiance normale
@@ -278,3 +313,37 @@ mqtt_derived:
     state_class: measurement
     icon: mdi:timer-sand
     precision: 2
+
+# Cumulative run-time counters.
+#
+# Home Assistant keeps long-term statistics only for sensors with a
+# state_class. The pump states are binary sensors, purged with the states table
+# after purge_keep_days, so their run time would never accumulate.
+#
+# The burner deliberately has no counter here: the appliance already exposes an
+# authoritative one at 0x08A7, and a second series for the same physical
+# quantity would diverge from it.
+#
+# These names are final. Renaming an entity orphans its statistics and starts a
+# new empty series, so the naming has to be settled before history accumulates.
+mqtt_runtime:
+  # The highest-value measurement in this configuration. The recirculation pump
+  # reads 1 in August with no space heating; a loop running around the clock
+  # costs 1300-2600 kWh a year if poorly insulated, against 3250 kWh a year of
+  # otherwise unexplained hot-water loss measured at the gas meter. Proving or
+  # killing that needs run-time history, and the remedy is a time program
+  # rather than any hardware work.
+  - source_alias: getPumpeStatusZirku
+    alias: pumpZirkuHours
+    friendly_name: Heures pompe de bouclage
+    icon: mdi:pump
+
+  - source_alias: getPumpeStatusM1
+    alias: pumpM1Hours
+    friendly_name: Heures circulateur M1
+    icon: mdi:pump
+
+  - source_alias: getPumpeStatusSp
+    alias: pumpSpHours
+    friendly_name: Heures pompe de charge ballon
+    icon: mdi:pump

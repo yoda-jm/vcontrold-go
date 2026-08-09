@@ -33,6 +33,16 @@ type Publisher struct {
 	// Values computed from the published readings.
 	derived        *derivedState
 	derivedConfigs []config.MQTTDerivedConfig
+
+	// Cumulative run-time counters built from on/off datapoints.
+	runtime        *runtimeTracker
+	runtimeConfigs []config.MQTTRuntimeConfig
+
+	// Refuses counter readings that cannot be true.
+	guard *counterGuard
+
+	// Per-address settings, indexed by address, for the checks that need them.
+	addressSettings map[uint16]config.MQTTAddress
 }
 
 // NewPublisher creates a new MQTT publisher
@@ -49,13 +59,16 @@ func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
 	}
 
 	// Build address to alias mapping
+	p.addressSettings = make(map[uint16]config.MQTTAddress)
 	for _, addr := range mqttConfig.Addresses {
 		if hexAddr, err := config.ParseHexAddress(addr.Address); err == nil {
 			p.addressMap[hexAddr] = addr.Alias
+			p.addressSettings[hexAddr] = addr
 		} else {
 			logging.Warn("MQTT: Invalid address '%s' ignored: %v", addr.Address, err)
 		}
 	}
+	p.guard = newCounterGuard()
 
 	// Initialize MQTT client if enabled
 	if mqttConfig.Enabled {
@@ -138,9 +151,26 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 		return
 	}
 
+	// A counter that cannot be true must not leave the daemon: filtering it in
+	// Home Assistant would be too late, the row is already written.
+	cleaned := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
+	settings := p.settingsFor(event.Address)
+	if p.guard != nil && !p.guard.accept(alias, cleaned, settings.MaxIncreasePerHour, time.Now()) {
+		return
+	}
+
 	// Publish to MQTT
 	topic := fmt.Sprintf("%s/%s", p.config.TopicRoot, alias)
 	p.publishValue(topic, event.Reading.FormattedValue, event.Address, alias)
+
+	// A text value has no long-term history in Home Assistant. Where the
+	// configuration asks for it, mirror the raw protocol value as a number.
+	if settings.RawAlias != "" {
+		p.publishRawMirror(settings.RawAlias, event.Reading.RawValue)
+	}
+
+	// Integrate on/off datapoints into their run-time counters.
+	p.handleRuntime(alias, cleaned, time.Now())
 
 	// Update last published timestamp with cleaned value
 	cleanedValue := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
@@ -323,4 +353,78 @@ func (p *Publisher) availabilityTopic() string {
 		root = p.config.TopicRoot
 	}
 	return root + "/status"
+}
+
+// settingsFor returns the per-address configuration, or a zero value when the
+// address is not configured.
+func (p *Publisher) settingsFor(address uint16) config.MQTTAddress {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+	return p.addressSettings[address]
+}
+
+// publishRawMirror publishes the raw protocol value as a number.
+//
+// The decoded text is what a human reads; this is what survives. Home Assistant
+// keeps hourly statistics for a numeric sensor forever, so a mode that changes
+// a handful of times a year leaves a faithful timeline that never purges.
+// Emitting the protocol byte rather than an invented mapping keeps the meaning
+// anchored to vcontrold.xml.
+func (p *Publisher) publishRawMirror(alias string, raw interface{}) {
+	data, ok := raw.([]byte)
+	if !ok || len(data) == 0 {
+		return
+	}
+
+	// Little-endian, as everywhere else in this protocol.
+	var value uint64
+	for i := len(data) - 1; i >= 0; i-- {
+		value = value<<8 | uint64(data[i])
+	}
+
+	topic := p.stateTopic(alias)
+	payload := strconv.FormatUint(value, 10)
+	if token := p.client.Publish(topic, 0, true, payload); token.Wait() && token.Error() != nil {
+		logging.Error("Failed to publish the raw mirror %s: %v", topic, token.Error())
+		return
+	}
+	logging.Debug("MIRROR: %s = %s", topic, payload)
+}
+
+// PublishRawMirrorDiscovery announces the numeric mirrors to Home Assistant.
+func (p *Publisher) PublishRawMirrorDiscovery() error {
+	if err := p.readyToDiscover(); err != nil {
+		if err == errDiscoveryDisabled {
+			return nil
+		}
+		return err
+	}
+
+	for _, addr := range p.config.Addresses {
+		if addr.RawAlias == "" {
+			continue
+		}
+
+		objectID := sanitizeObjectID(addr.RawAlias)
+		if objectID == "" {
+			continue
+		}
+
+		displayName := addr.RawFriendlyName
+		if displayName == "" {
+			displayName = addr.RawAlias
+		}
+
+		payload := sensorPayload{
+			entityBase: newEntityBase(p, objectID, displayName, "mdi:numeric"),
+			StateTopic: p.stateTopic(addr.RawAlias),
+			// measurement, with no unit: the mean is meaningless for a code,
+			// but the hourly min and max carry the timeline and never purge.
+			StateClass: "measurement",
+		}
+
+		p.publishDiscovery("sensor", objectID, payload)
+	}
+
+	return nil
 }

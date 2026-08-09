@@ -13,12 +13,13 @@ import (
 type sensorPayload struct {
 	entityBase
 
-	StateTopic        string `json:"state_topic"`
-	UnitOfMeasurement string `json:"unit_of_measurement,omitempty"`
-	DeviceClass       string `json:"device_class,omitempty"`
-	StateClass        string `json:"state_class,omitempty"`
-	PayloadOn         string `json:"payload_on,omitempty"`
-	PayloadOff        string `json:"payload_off,omitempty"`
+	StateTopic        string   `json:"state_topic"`
+	UnitOfMeasurement string   `json:"unit_of_measurement,omitempty"`
+	DeviceClass       string   `json:"device_class,omitempty"`
+	StateClass        string   `json:"state_class,omitempty"`
+	PayloadOn         string   `json:"payload_on,omitempty"`
+	PayloadOff        string   `json:"payload_off,omitempty"`
+	Options           []string `json:"options,omitempty"`
 }
 
 // sensorMetadata is what Home Assistant needs to know about a measurement.
@@ -178,6 +179,13 @@ func (p *Publisher) buildSensorPayload(addr config.MQTTAddress) (component, obje
 		UnitOfMeasurement: meta.Unit,
 		DeviceClass:       meta.DeviceClass,
 		StateClass:        meta.StateClass,
+	}
+
+	// device_class enum needs its options list, and rejects a state_class.
+	if addr.DeviceClass == "enum" && len(addr.Options) > 0 {
+		payload.Options = addr.Options
+		payload.StateClass = ""
+		payload.UnitOfMeasurement = ""
 	}
 
 	if binary {
