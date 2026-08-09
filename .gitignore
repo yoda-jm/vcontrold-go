@@ -49,12 +49,14 @@ old/
 backup/
 *.bak
 
-# XML files (user should provide their own)
-xml/
+# The community XML is fetched by `make deps`, never committed.
+# Anchored to the root: an unanchored "xml/" also matches internal/xml/, which
+# is Go source, and a fresh clone then fails to compile.
+/xml/
 *.xml
 
-# ...sauf les surcharges d'adresses propres a la machine : elles constatent un
-# ecart mesure avec vito.xml et doivent survivre a un `make deps`.
+# ...except the machine-specific address overrides: they record a measured
+# difference from vito.xml and must survive a `make deps`.
 !overrides/*.xml
 
 # Test data
