@@ -139,6 +139,7 @@ func (s *Server) Start() error {
 	r.HandleFunc("/api/mqtt/hooks/{index:[0-9]+}/toggle", s.toggleMqttHookHandler).Methods("POST")
 	r.HandleFunc("/api/mqtt/hooks/test/{index:[0-9]+}", s.testMqttHookHandler).Methods("POST")
 	r.HandleFunc("/api/events", s.cacheEventsHandler).Methods("GET")
+	r.HandleFunc("/api/device", s.getDeviceHandler).Methods("GET")
 
 	r.HandleFunc("/", s.indexHandler).Methods("GET")
 
@@ -580,6 +581,22 @@ func (s *Server) saveYamlConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// getDeviceHandler reports which controller answered, and how much that
+// identification is worth.
+func (s *Server) getDeviceHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	info := s.reader.GetDeviceInfo()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":      fmt.Sprintf("0x%04X", info.ID),
+		"model":   info.Model,
+		"support": info.Support.String(),
+		"profile": info.XMLProfile,
+		"notes":   info.Notes,
+		"device":  s.config.Device,
+	})
 }
 
 // getMqttStatusHandler returns the current MQTT publisher status

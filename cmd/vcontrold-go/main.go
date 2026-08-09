@@ -391,6 +391,7 @@ func reportDeviceIdentity(reader *viessmann.Reader) {
 		return
 	}
 
+	reader.SetDeviceInfo(info)
 	logging.Info("Controller: %s", info.Describe())
 	if info.Notes != "" {
 		logging.Info("  %s", info.Notes)

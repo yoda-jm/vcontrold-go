@@ -231,6 +231,22 @@ Levels: `debug`, `info` (default), `warn`, `error`. `-verbose` is shorthand for
 
 ---
 
+## Web interface
+
+The daemon serves a small status page on `web_port`, compiled into the binary so
+it works wherever the binary does:
+
+- which controller answered, and whether this project has been **verified**
+  against it or is inferring from the community XML;
+- every reading with its address and age, dimmed once stale;
+- datapoints the appliance does not carry, listed as unavailable rather than
+  shown as a measurement;
+- refresh groups, MQTT connection state, read success rate.
+
+It is a diagnostic view and deliberately shows the protocol names
+(`getBrennerStunden1`), so anything on screen can be traced straight back to
+`vito.xml`. The friendly names live in Home Assistant.
+
 ## Deployment
 
 `make deploy` sends the binary, configuration and overrides to the target host

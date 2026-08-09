@@ -23,7 +23,18 @@ type Reader struct {
 	logger         LoggerInterface
 	metrics        MetricsInterface
 	dataPoints     []config.DataPoint
+
+	// deviceInfo is what the controller said it was at startup. Kept so the
+	// web interface can show how much the readings are worth: this project is
+	// verified against one controller and infers the rest.
+	deviceInfo DeviceInfo
 }
+
+// SetDeviceInfo records the result of the startup identification.
+func (r *Reader) SetDeviceInfo(info DeviceInfo) { r.deviceInfo = info }
+
+// GetDeviceInfo returns what the controller said it was.
+func (r *Reader) GetDeviceInfo() DeviceInfo { return r.deviceInfo }
 
 // Reading represents a parameter reading with metadata
 type Reading struct {
