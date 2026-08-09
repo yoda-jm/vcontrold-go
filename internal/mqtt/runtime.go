@@ -33,6 +33,21 @@ type runtimeTracker struct {
 
 	statePath string
 	dirty     bool
+
+	// published holds the last payload sent per alias, so an unchanged total
+	// is not republished on every reading.
+	published map[string]string
+}
+
+// changed reports whether the total differs from the one last published.
+func (t *runtimeTracker) changed(alias, payload string) bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if previous, ok := t.published[alias]; ok && previous == payload {
+		return false
+	}
+	t.published[alias] = payload
+	return true
 }
 
 // maxCreditableGap bounds how much unobserved time may be credited between two
@@ -50,6 +65,7 @@ func newRuntimeTracker(statePath string) *runtimeTracker {
 		seconds:   make(map[string]float64),
 		lastState: make(map[string]bool),
 		lastSeen:  make(map[string]time.Time),
+		published: make(map[string]string),
 		statePath: statePath,
 	}
 	t.load()
@@ -241,6 +257,13 @@ func (p *Publisher) handleRuntime(sourceAlias, cleanedValue string, now time.Tim
 
 		topic := p.stateTopic(r.Alias)
 		payload := fmt.Sprintf("%.4f", hours)
+
+		// While the pump is off the total does not move, and republishing it
+		// every minute would be noise.
+		if !p.runtime.changed(r.Alias, payload) {
+			continue
+		}
+
 		if token := p.client.Publish(topic, 0, true, payload); token.Wait() && token.Error() != nil {
 			logging.Error("Failed to publish run-time %s: %v", topic, token.Error())
 			continue

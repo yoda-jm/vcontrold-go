@@ -149,3 +149,38 @@ func TestRuntimeTracker_CorruptStateFileIsSurvivable(t *testing.T) {
 		t.Error("the tracker should still work after a corrupt state file")
 	}
 }
+
+// Regression: the tracker must be fed by every reading, not only by the ones
+// that survive republish suppression.
+//
+// Unchanged values are republished at most once an hour. A tracker fed only by
+// those sees a one-hour gap between samples, which is longer than the
+// creditable gap, so it credits nothing — and reports zero run time forever
+// while the pump runs continuously. Silent zero is the worst possible failure
+// here, because it looks like an answer.
+func TestRuntimeTracker_SamplingMustNotBeThrottled(t *testing.T) {
+	tracker := newRuntimeTracker("")
+	spec := testRuntimeSpec()
+	start := time.Now()
+
+	// Sampled every minute, as the refresh group actually reads it.
+	tracker.observe(spec, true, start)
+	for minute := 1; minute <= 10; minute++ {
+		tracker.observe(spec, true, start.Add(time.Duration(minute)*time.Minute))
+	}
+	frequent, _ := tracker.observe(spec, true, start.Add(11*time.Minute))
+
+	if want := 11.0 / 60; frequent < want*0.99 || frequent > want*1.01 {
+		t.Fatalf("sampled every minute = %v h, want about %v", frequent, want)
+	}
+
+	// The same eleven minutes, but observed only at the start and the end, as
+	// it would be if the tracker were fed by hourly republishes.
+	throttled := newRuntimeTracker("")
+	throttled.observe(spec, true, start)
+	sparse, _ := throttled.observe(spec, true, start.Add(time.Hour))
+
+	if sparse != 0 {
+		t.Errorf("a gap beyond the creditable window credited %v h; it must credit nothing", sparse)
+	}
+}

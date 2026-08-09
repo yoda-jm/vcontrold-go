@@ -145,6 +145,14 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 		return
 	}
 
+	cleanedForRuntime := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
+
+	// Integrate on/off datapoints on every observation, before any publish
+	// suppression. Republishing is throttled to once an hour for an unchanged
+	// value, and a tracker fed only by those would see a one-hour gap between
+	// samples, credit nothing, and silently report zero run time forever.
+	p.handleRuntime(alias, cleanedForRuntime, time.Now())
+
 	shouldPublish, reason := p.shouldPublish(event)
 	if !shouldPublish {
 		logging.Warn("MQTT: Skipping publish for 0x%04X (%s): %s", event.Address, alias, reason)
@@ -153,9 +161,8 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 
 	// A counter that cannot be true must not leave the daemon: filtering it in
 	// Home Assistant would be too late, the row is already written.
-	cleaned := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
 	settings := p.settingsFor(event.Address)
-	if p.guard != nil && !p.guard.accept(alias, cleaned, settings.MaxIncreasePerHour, time.Now()) {
+	if p.guard != nil && !p.guard.accept(alias, cleanedForRuntime, settings.MaxIncreasePerHour, time.Now()) {
 		return
 	}
 
@@ -168,9 +175,6 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 	if settings.RawAlias != "" {
 		p.publishRawMirror(settings.RawAlias, event.Reading.RawValue)
 	}
-
-	// Integrate on/off datapoints into their run-time counters.
-	p.handleRuntime(alias, cleaned, time.Now())
 
 	// Update last published timestamp with cleaned value
 	cleanedValue := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
