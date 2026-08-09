@@ -4,7 +4,7 @@ package mqtt
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"strconv"
 	"strings"
 	"time"
@@ -44,7 +44,7 @@ func NewHookManager(cfg *config.Config, reader *viessmann.Reader) *HookManager {
 // AddHook registers a new MQTT hook
 func (hm *HookManager) AddHook(hook MQTTHook) {
 	hm.hooks = append(hm.hooks, hook)
-	log.Printf("MQTT Hook registered: %s -> %s", hook.Topic, hook.Description)
+	logging.Info("MQTT Hook registered: %s -> %s", hook.Topic, hook.Description)
 
 	// Subscribe if already connected
 	if hm.connected && hm.client != nil && hook.Enabled {
@@ -55,7 +55,7 @@ func (hm *HookManager) AddHook(hook MQTTHook) {
 // LoadHooks loads hooks from configuration
 func (hm *HookManager) LoadHooks(hooks []MQTTHook) {
 	hm.hooks = hooks
-	log.Printf("MQTT: Loaded %d hooks from configuration", len(hooks))
+	logging.Info("MQTT: Loaded %d hooks from configuration", len(hooks))
 
 	// Subscribe to all enabled hooks if connected
 	if hm.connected && hm.client != nil {
@@ -96,12 +96,12 @@ func (hm *HookManager) Connect() error {
 
 	// Connection handlers
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		log.Printf("MQTT Hooks: Connection lost: %v", err)
+		logging.Info("MQTT Hooks: Connection lost: %v", err)
 		hm.connected = false
 	})
 
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
-		log.Printf("MQTT Hooks: Connected to broker %s", mqttConfig.Host)
+		logging.Info("MQTT Hooks: Connected to broker %s", mqttConfig.Host)
 		hm.connected = true
 
 		// Subscribe to all enabled hooks
@@ -127,25 +127,25 @@ func (hm *HookManager) subscribeToHook(hook MQTTHook) {
 		return
 	}
 
-	log.Printf("MQTT Hook: Subscribing to %s (%s)", hook.Topic, hook.Description)
+	logging.Info("MQTT Hook: Subscribing to %s (%s)", hook.Topic, hook.Description)
 
 	token := hm.client.Subscribe(hook.Topic, 0, func(client mqtt.Client, msg mqtt.Message) {
 		hm.handleHookMessage(hook, msg)
 	})
 
 	if token.Wait() && token.Error() != nil {
-		log.Printf("MQTT Hook: Failed to subscribe to %s: %v", hook.Topic, token.Error())
+		logging.Error("MQTT Hook: Failed to subscribe to %s: %v", hook.Topic, token.Error())
 	}
 }
 
 // handleHookMessage processes a message received on a hook topic
 func (hm *HookManager) handleHookMessage(hook MQTTHook, msg mqtt.Message) {
 	payload := string(msg.Payload())
-	log.Printf("MQTT Hook: Received on %s: %s (Action: %s)", hook.Topic, payload, hook.Action.Type)
+	logging.Info("MQTT Hook: Received on %s: %s (Action: %s)", hook.Topic, payload, hook.Action.Type)
 
 	// Execute the configured action
 	if err := hm.executeAction(hook.Action, payload); err != nil {
-		log.Printf("MQTT Hook: Failed to execute action %s for topic %s: %v", hook.Action.Type, hook.Topic, err)
+		logging.Error("MQTT Hook: Failed to execute action %s for topic %s: %v", hook.Action.Type, hook.Topic, err)
 
 		// Optionally publish error status
 		hm.publishHookStatus(hook.Topic+"/error", map[string]interface{}{
@@ -240,7 +240,7 @@ func (hm *HookManager) executeSetTemperature(action config.MQTTHookAction, paylo
 		if err != nil {
 			return fmt.Errorf("failed to write temperature %.1f°C to address 0x%04X: %v", temp, targetAddress, err)
 		}
-		log.Printf("MQTT Hook: Set temperature to %.1f°C at address 0x%04X", temp, targetAddress)
+		logging.Info("MQTT Hook: Set temperature to %.1f°C at address 0x%04X", temp, targetAddress)
 		return nil
 	}
 
@@ -290,7 +290,7 @@ func (hm *HookManager) executeSetMode(action config.MQTTHookAction, payload stri
 		if err != nil {
 			return fmt.Errorf("failed to write mode %s to address 0x%04X: %v", mode, targetAddress, err)
 		}
-		log.Printf("MQTT Hook: Set mode to %s at address 0x%04X", mode, targetAddress)
+		logging.Info("MQTT Hook: Set mode to %s at address 0x%04X", mode, targetAddress)
 		return nil
 	}
 
@@ -334,7 +334,7 @@ func (hm *HookManager) executeWriteAddress(action config.MQTTHookAction, payload
 		if err != nil {
 			return fmt.Errorf("failed to write to address 0x%04X: %v", targetAddress, err)
 		}
-		log.Printf("MQTT Hook: Wrote %v to address 0x%04X", writeData, targetAddress)
+		logging.Info("MQTT Hook: Wrote %v to address 0x%04X", writeData, targetAddress)
 		return nil
 	}
 
@@ -387,7 +387,7 @@ func (hm *HookManager) executeWriteParameter(action config.MQTTHookAction, paylo
 		if err != nil {
 			return fmt.Errorf("failed to write to parameter '%s' (0x%04X): %v", action.Parameter, targetAddress, err)
 		}
-		log.Printf("MQTT Hook: Wrote %.1f to parameter '%s' (0x%04X)", value, action.Parameter, targetAddress)
+		logging.Info("MQTT Hook: Wrote %.1f to parameter '%s' (0x%04X)", value, action.Parameter, targetAddress)
 		return nil
 	}
 
@@ -452,13 +452,13 @@ func (hm *HookManager) publishHookStatus(topic string, payload map[string]interf
 
 	jsonData, err := json.Marshal(map[string]interface{}{"status": payload})
 	if err != nil {
-		log.Printf("MQTT Hook: Failed to create status JSON: %v", err)
+		logging.Error("MQTT Hook: Failed to create status JSON: %v", err)
 		return
 	}
 
 	token := hm.client.Publish(topic, 0, false, string(jsonData))
 	if token.Wait() && token.Error() != nil {
-		log.Printf("MQTT Hook: Failed to publish status to %s: %v", topic, token.Error())
+		logging.Error("MQTT Hook: Failed to publish status to %s: %v", topic, token.Error())
 	}
 }
 
@@ -467,7 +467,7 @@ func (hm *HookManager) Disconnect() {
 	if hm.client != nil && hm.connected {
 		hm.client.Disconnect(250)
 		hm.connected = false
-		log.Printf("MQTT Hooks: Disconnected")
+		logging.Info("MQTT Hooks: Disconnected")
 	}
 }
 

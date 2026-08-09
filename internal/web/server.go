@@ -4,7 +4,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"net/http"
 	"os"
 	"strconv"
@@ -48,15 +48,15 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 	// retained, so Home Assistant finds them again on every restart, and it is
 	// their state_class that triggers long-term statistics.
 	if err := s.mqttPublisher.PublishDiscovery(); err != nil {
-		log.Printf("MQTT discovery not published: %v", err)
+		logging.Warn("MQTT discovery not published: %v", err)
 	}
 
 	if cfg.YamlConfig != nil {
 		if err := s.mqttPublisher.PublishClimateDiscovery(cfg.YamlConfig.Climates); err != nil {
-			log.Printf("MQTT climate discovery not published: %v", err)
+			logging.Warn("MQTT climate discovery not published: %v", err)
 		}
 		if err := s.mqttPublisher.PublishDerivedDiscovery(cfg.YamlConfig.Derived); err != nil {
-			log.Printf("MQTT derived discovery not published: %v", err)
+			logging.Warn("MQTT derived discovery not published: %v", err)
 		}
 	}
 
@@ -76,7 +76,7 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 		s.hookManager.LoadHooks(hooks)
 		// Connect hook manager to MQTT
 		if err := s.hookManager.Connect(); err != nil {
-			log.Printf("Failed to connect MQTT hook manager: %v", err)
+			logging.Error("Failed to connect MQTT hook manager: %v", err)
 		}
 	}
 
@@ -122,7 +122,7 @@ func (s *Server) Start() error {
 	// Serve static files if needed
 	// r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 
-	log.Printf("Server starting on port %s", s.config.WebPort)
+	logging.Info("Server starting on port %s", s.config.WebPort)
 	return http.ListenAndServe(":"+s.config.WebPort, r)
 }
 
@@ -542,7 +542,7 @@ func (s *Server) saveYamlConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Update auto refresh if it changed
 	if err := s.reader.UpdateAutoRefreshConfig(&newConfig.AutoRefresh); err != nil {
-		log.Printf("Warning: Failed to update auto refresh after config save: %v", err)
+		logging.Error("Warning: Failed to update auto refresh after config save: %v", err)
 	}
 
 	// Update MQTT publisher configuration
@@ -581,7 +581,7 @@ func (s *Server) indexHandler(w http.ResponseWriter, r *http.Request) {
 	// Read the simple HTML template
 	htmlBytes, err := os.ReadFile("internal/web/simple.html")
 	if err != nil {
-		log.Printf("Could not read simple.html template: %v", err)
+		logging.Info("Could not read simple.html template: %v", err)
 		http.Error(w, "Template not found", http.StatusInternalServerError)
 		return
 	}
@@ -673,7 +673,7 @@ func (s *Server) cacheEventsHandler(w http.ResponseWriter, r *http.Request) {
 
 			jsonData, err := json.Marshal(eventData)
 			if err != nil {
-				log.Printf("Failed to marshal event data: %v", err)
+				logging.Error("Failed to marshal event data: %v", err)
 				continue
 			}
 
@@ -773,7 +773,7 @@ func (s *Server) toggleMqttHookHandler(w http.ResponseWriter, r *http.Request) {
 	// Save config to file if YAML config file is specified
 	if s.config.YamlConfigFile != "" {
 		if err := config.SaveYamlConfig(s.config.YamlConfigFile, s.config.YamlConfig); err != nil {
-			log.Printf("Failed to save YAML config: %v", err)
+			logging.Error("Failed to save YAML config: %v", err)
 			http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
 			return
 		}
@@ -819,7 +819,7 @@ func (s *Server) testMqttHookHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Simulate MQTT hook testing
 	if s.hookManager != nil {
-		log.Printf("Testing MQTT hook %d (%s) with payload: %s",
+		logging.Info("Testing MQTT hook %d (%s) with payload: %s",
 			index, hookConfig.Description, testRequest.Payload)
 		// In a real implementation, you could call a test method on hook manager
 	}

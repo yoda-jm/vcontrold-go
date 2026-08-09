@@ -22,6 +22,7 @@ type Config struct {
 	WebPort          string
 	WebMode          bool
 	Verbose          bool
+	LogLevel         string
 	MQTTBroker       string
 	MQTTPort         int
 	MQTTUsername     string

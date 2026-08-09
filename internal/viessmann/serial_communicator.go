@@ -9,6 +9,7 @@ import (
 	"go.bug.st/serial"
 
 	"github.com/yourusername/vcontrold-go/internal/errors"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"github.com/yourusername/vcontrold-go/internal/protocol"
 )
 
@@ -17,6 +18,11 @@ type SerialCommunicator struct {
 	port   serial.Port
 	mutex  sync.Mutex
 	device string
+
+	// log carries frame-level tracing. At debug level every transaction shows
+	// the bytes sent and received, which is the only way to tell a protocol
+	// fault from a wrong address without an oscilloscope.
+	log *logging.Logger
 
 	// lastTransaction records when the last transaction ended, so a rest can
 	// be enforced before the next one. Guarded by mutex.
@@ -46,6 +52,7 @@ func (sc *SerialCommunicator) settle() {
 func NewSerialCommunicator(device string) (*SerialCommunicator, error) {
 	comm := &SerialCommunicator{
 		device: device,
+		log:    logging.For("serial"),
 	}
 
 	if err := comm.initializePort(); err != nil {
@@ -164,12 +171,19 @@ func (sc *SerialCommunicator) sendReadCommandAndGetResponse(address uint16, size
 		byte(size),
 	}
 
+	sc.trace("read  0x%04X -> % X", address, command)
+
 	if err := sc.writeBytes(command); err != nil {
 		return nil, err
 	}
 
-	// Read response
-	return sc.readNBytes(uint64(size))
+	response, err := sc.readNBytes(uint64(size))
+	if err != nil {
+		return nil, err
+	}
+
+	sc.trace("read  0x%04X <- % X", address, response)
+	return response, nil
 }
 
 // writeByte writes a single byte to the serial port
@@ -283,6 +297,8 @@ func (sc *SerialCommunicator) sendWriteCommand(address uint16, data []byte) erro
 	}
 	command = append(command, data...) // SEND BYTES
 
+	sc.trace("write 0x%04X -> % X", address, command)
+
 	if err := sc.writeBytes(command); err != nil {
 		return errors.Wrap(errors.ErrCommunication, "failed to send write command", err)
 	}
@@ -293,6 +309,8 @@ func (sc *SerialCommunicator) sendWriteCommand(address uint16, data []byte) erro
 		return errors.Wrap(errors.ErrCommunication, "failed to read write status", err)
 	}
 
+	sc.trace("write 0x%04X <- status %02X", address, statusResponse[0])
+
 	if statusResponse[0] != protocol.KW2_STATUS_SUCCESS {
 		return errors.New(errors.ErrProtocol,
 			fmt.Sprintf("write rejected at 0x%04X: status 0x%02X (expected 0x%02X = OK)",
@@ -300,4 +318,15 @@ func (sc *SerialCommunicator) sendWriteCommand(address uint16, data []byte) erro
 	}
 
 	return nil
+}
+
+// trace records a frame at debug level.
+//
+// Guarded by Enabled so the hex formatting is skipped entirely when nobody is
+// listening: this runs on every reading of every refresh cycle.
+func (sc *SerialCommunicator) trace(format string, args ...interface{}) {
+	if sc.log == nil || !sc.log.Enabled(logging.LevelDebug) {
+		return
+	}
+	sc.log.Debug(format, args...)
 }

@@ -3,7 +3,7 @@ package viessmann
 
 import (
 	"fmt"
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"sync"
 	"time"
 
@@ -57,7 +57,7 @@ func (mgr *MultiGroupRefresher) Start() error {
 				return errors.Wrap(errors.ErrValidation, fmt.Sprintf("invalid refresh interval for group '%s'", group.Name), err)
 			}
 
-			log.Printf("Starting refresh group '%s' with %d addresses every %v",
+			logging.Info("Starting refresh group '%s' with %d addresses every %v",
 				group.Name, len(group.Addresses), duration)
 
 			ticker := time.NewTicker(duration)
@@ -67,7 +67,7 @@ func (mgr *MultiGroupRefresher) Start() error {
 			mgr.stopChannels[group.Name] = stopCh
 
 			// Do initial refresh immediately for this group
-			log.Printf("Performing initial refresh for group '%s'", group.Name)
+			logging.Info("Performing initial refresh for group '%s'", group.Name)
 			go func(g config.RefreshGroup) {
 				mgr.refreshGroup(g)
 			}(group)
@@ -79,12 +79,12 @@ func (mgr *MultiGroupRefresher) Start() error {
 	}
 
 	if enabledGroups == 0 {
-		log.Printf("No enabled refresh groups found")
+		logging.Info("No enabled refresh groups found")
 		return nil
 	}
 
 	mgr.running = true
-	log.Printf("Multi-group refresher started with %d active groups", enabledGroups)
+	logging.Info("Multi-group refresher started with %d active groups", enabledGroups)
 	return nil
 }
 
@@ -97,7 +97,7 @@ func (mgr *MultiGroupRefresher) Stop() {
 		return
 	}
 
-	log.Printf("Stopping multi-group refresher")
+	logging.Info("Stopping multi-group refresher")
 
 	// Stop all groups
 	for groupName, stopCh := range mgr.stopChannels {
@@ -184,7 +184,7 @@ func (mgr *MultiGroupRefresher) UpdateGroups(newGroups []config.RefreshGroup) er
 // refreshGroupLoop is the main refresh loop for a specific group
 func (mgr *MultiGroupRefresher) refreshGroupLoop(group config.RefreshGroup, ticker *time.Ticker, stopCh chan bool) {
 	defer func() {
-		log.Printf("Refresh group '%s' loop stopped", group.Name)
+		logging.Info("Refresh group '%s' loop stopped", group.Name)
 	}()
 
 	for {
@@ -199,7 +199,7 @@ func (mgr *MultiGroupRefresher) refreshGroupLoop(group config.RefreshGroup, tick
 
 // refreshGroup refreshes all addresses in a specific group
 func (mgr *MultiGroupRefresher) refreshGroup(group config.RefreshGroup) {
-	log.Printf("Group '%s': refreshing %d addresses", group.Name, len(group.Addresses))
+	logging.Info("Group '%s': refreshing %d addresses", group.Name, len(group.Addresses))
 
 	dataPoints := mgr.reader.GetDataPoints()
 	addressToDP := make(map[uint16]config.DataPoint)
@@ -216,7 +216,7 @@ func (mgr *MultiGroupRefresher) refreshGroup(group config.RefreshGroup) {
 	// Parse addresses to uint16
 	addresses, err := group.GetAddressesAsUint16()
 	if err != nil {
-		log.Printf("Group '%s': failed to parse addresses: %v", group.Name, err)
+		logging.Error("Group '%s': failed to parse addresses: %v", group.Name, err)
 		return
 	}
 
@@ -227,18 +227,18 @@ func (mgr *MultiGroupRefresher) refreshGroup(group config.RefreshGroup) {
 				reading := mgr.reader.ReadParameter(dp, index)
 				if reading.Success {
 					successCount++
-					log.Printf("Group '%s': 0x%04X (%s) = %s", group.Name, address, dp.Name, reading.FormattedValue)
+					logging.Info("Group '%s': 0x%04X (%s) = %s", group.Name, address, dp.Name, reading.FormattedValue)
 				} else {
-					log.Printf("Group '%s': 0x%04X (%s) failed: %s", group.Name, address, dp.Name, reading.Error)
+					logging.Error("Group '%s': 0x%04X (%s) failed: %s", group.Name, address, dp.Name, reading.Error)
 				}
 			}
 		} else {
-			log.Printf("Group '%s': 0x%04X not found in data points", group.Name, address)
+			logging.Info("Group '%s': 0x%04X not found in data points", group.Name, address)
 		}
 
 		// Small delay between reads to avoid overwhelming the device
 		time.Sleep(protocol.KW2_READ_DELAY_MS * time.Millisecond)
 	}
 
-	log.Printf("Group '%s' completed: %d/%d successful", group.Name, successCount, len(addresses))
+	logging.Info("Group '%s' completed: %d/%d successful", group.Name, successCount, len(addresses))
 }

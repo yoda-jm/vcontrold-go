@@ -2,7 +2,7 @@
 package mqtt
 
 import (
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 
 	"github.com/yourusername/vcontrold-go/internal/config"
 )
@@ -52,7 +52,7 @@ func (p *Publisher) PublishClimateDiscovery(climates []config.MQTTClimateConfig)
 
 	for _, c := range climates {
 		if c.TargetAlias == "" || c.ObjectID == "" {
-			log.Printf("MQTT climate: skipping %q, target_alias and object_id are required", c.Name)
+			logging.Warn("MQTT climate: skipping %q, target_alias and object_id are required", c.Name)
 			continue
 		}
 

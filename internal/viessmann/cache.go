@@ -2,7 +2,7 @@
 package viessmann
 
 import (
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"sync"
 	"time"
 )
@@ -135,7 +135,7 @@ func (c *ParameterCache) Set(address uint16, reading Reading) {
 			cached.ChangeCount = existing.ChangeCount + 1
 			eventType = EventValueChanged
 			previousValue = existing.FormattedValue
-			log.Printf("Cache updated: 0x%04X value changed from '%s' to '%s' (change #%d)",
+			logging.Info("Cache updated: 0x%04X value changed from '%s' to '%s' (change #%d)",
 				address, existing.FormattedValue, reading.FormattedValue, cached.ChangeCount)
 		} else {
 			// Value didn't change, keep existing timestamps
@@ -150,7 +150,7 @@ func (c *ParameterCache) Set(address uint16, reading Reading) {
 		cached.LastChange = now
 		cached.ChangeCount = 1
 		eventType = EventValueCreated
-		log.Printf("Cache initialized: 0x%04X first value '%s'", address, reading.FormattedValue)
+		logging.Info("Cache initialized: 0x%04X first value '%s'", address, reading.FormattedValue)
 	}
 
 	c.readings[address] = cached
@@ -176,7 +176,7 @@ func (c *ParameterCache) Set(address uint16, reading Reading) {
 		go func(cb CacheCallback) {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("Cache callback panic: %v", r)
+					logging.Error("Cache callback panic: %v", r)
 				}
 			}()
 			cb(event)

@@ -4,7 +4,7 @@ package mqtt
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"strings"
 )
 
@@ -91,17 +91,17 @@ func (p *Publisher) commandTopic(alias string) string {
 func (p *Publisher) publishDiscovery(component, objectID string, payload any) bool {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("MQTT discovery: failed to marshal %s/%s: %v", component, objectID, err)
+		logging.Error("MQTT discovery: failed to marshal %s/%s: %v", component, objectID, err)
 		return false
 	}
 
 	topic := fmt.Sprintf("homeassistant/%s/%s/%s/config", component, deviceIdentifier, objectID)
 	if token := p.client.Publish(topic, 0, true, body); token.Wait() && token.Error() != nil {
-		log.Printf("MQTT discovery: failed to publish %s: %v", topic, token.Error())
+		logging.Error("MQTT discovery: failed to publish %s: %v", topic, token.Error())
 		return false
 	}
 
-	log.Printf("MQTT discovery: %s", topic)
+	logging.Info("MQTT discovery: %s", topic)
 	return true
 }
 

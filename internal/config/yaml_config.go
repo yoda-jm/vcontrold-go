@@ -40,7 +40,14 @@ type YamlConfig struct {
 	VitoOverridesXML string `yaml:"vito_overrides_xml" json:"vito_overrides_xml"`
 	WebPort          string `yaml:"web_port" json:"web_port"`
 	WebMode          bool   `yaml:"web" json:"web"`
-	Verbose          bool   `yaml:"verbose" json:"verbose"`
+
+	// Verbose is shorthand for log_level: debug.
+	Verbose bool `yaml:"verbose" json:"verbose"`
+
+	// LogLevel is one of debug, info, warn, error. Empty means info.
+	// debug prints every serial transaction and every skipped publish, which
+	// is what you want when a reading looks wrong and you need the bytes.
+	LogLevel string `yaml:"log_level" json:"log_level"`
 
 	// Auto-refresh configuration
 	AutoRefresh AutoRefreshConfig `yaml:"auto_refresh" json:"auto_refresh"`

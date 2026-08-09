@@ -3,7 +3,7 @@ package viessmann
 
 import (
 	"fmt"
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"time"
 
 	"github.com/yourusername/vcontrold-go/internal/config"
@@ -48,7 +48,7 @@ func (ar *AutoRefresher) Start() error {
 	}
 
 	if !ar.config.Enabled || len(ar.addresses) == 0 {
-		log.Printf("Auto refresh is disabled or no addresses configured")
+		logging.Info("Auto refresh is disabled or no addresses configured")
 		return nil
 	}
 
@@ -57,7 +57,7 @@ func (ar *AutoRefresher) Start() error {
 		return errors.Wrap(errors.ErrValidation, "invalid refresh interval", err)
 	}
 
-	log.Printf("Starting auto refresh for %d addresses every %v", len(ar.addresses), duration)
+	logging.Info("Starting auto refresh for %d addresses every %v", len(ar.addresses), duration)
 
 	ar.ticker = time.NewTicker(duration)
 	ar.running = true
@@ -74,7 +74,7 @@ func (ar *AutoRefresher) Stop() {
 		return
 	}
 
-	log.Printf("Stopping auto refresh")
+	logging.Info("Stopping auto refresh")
 	ar.stopCh <- true
 
 	if ar.ticker != nil {
@@ -145,7 +145,7 @@ func (ar *AutoRefresher) refreshLoop() {
 		case <-ar.ticker.C:
 			ar.refreshAddresses()
 		case <-ar.stopCh:
-			log.Printf("Auto refresh loop stopped")
+			logging.Info("Auto refresh loop stopped")
 			return
 		}
 	}
@@ -153,7 +153,7 @@ func (ar *AutoRefresher) refreshLoop() {
 
 // refreshAddresses refreshes all configured addresses
 func (ar *AutoRefresher) refreshAddresses() {
-	log.Printf("Auto refresh: reading %d addresses", len(ar.addresses))
+	logging.Info("Auto refresh: reading %d addresses", len(ar.addresses))
 
 	dataPoints := ar.reader.GetDataPoints()
 	addressToDP := make(map[uint16]config.DataPoint)
@@ -174,20 +174,20 @@ func (ar *AutoRefresher) refreshAddresses() {
 				reading := ar.reader.ReadParameter(dp, index)
 				if reading.Success {
 					successCount++
-					log.Printf("Auto refresh: 0x%04X (%s) = %s", address, dp.Name, reading.FormattedValue)
+					logging.Info("Auto refresh: 0x%04X (%s) = %s", address, dp.Name, reading.FormattedValue)
 				} else {
-					log.Printf("Auto refresh: 0x%04X (%s) failed: %s", address, dp.Name, reading.Error)
+					logging.Error("Auto refresh: 0x%04X (%s) failed: %s", address, dp.Name, reading.Error)
 				}
 			}
 		} else {
-			log.Printf("Auto refresh: 0x%04X not found in data points", address)
+			logging.Info("Auto refresh: 0x%04X not found in data points", address)
 		}
 
 		// Small delay between reads to avoid overwhelming the device
 		time.Sleep(protocol.KW2_READ_DELAY_MS * time.Millisecond)
 	}
 
-	log.Printf("Auto refresh completed: %d/%d successful", successCount, len(ar.addresses))
+	logging.Info("Auto refresh completed: %d/%d successful", successCount, len(ar.addresses))
 }
 
 // getAddressStrings returns addresses as hex strings for status display

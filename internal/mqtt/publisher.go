@@ -3,7 +3,7 @@ package mqtt
 
 import (
 	"fmt"
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,7 +53,7 @@ func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
 		if hexAddr, err := config.ParseHexAddress(addr.Address); err == nil {
 			p.addressMap[hexAddr] = addr.Alias
 		} else {
-			log.Printf("MQTT: Invalid address '%s' ignored: %v", addr.Address, err)
+			logging.Warn("MQTT: Invalid address '%s' ignored: %v", addr.Address, err)
 		}
 	}
 
@@ -62,7 +62,7 @@ func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
 		p.initMQTTClient()
 	}
 
-	log.Printf("MQTT Publisher initialized: %d addresses monitored, enabled: %t", len(p.addressMap), p.enabled)
+	logging.Info("MQTT Publisher initialized: %d addresses monitored, enabled: %t", len(p.addressMap), p.enabled)
 	return p
 }
 
@@ -91,23 +91,23 @@ func (p *Publisher) initMQTTClient() {
 
 	// Set connection handlers
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		log.Printf("MQTT: Connection lost: %v", err)
+		logging.Info("MQTT: Connection lost: %v", err)
 	})
 
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
-		log.Printf("MQTT: Connected to broker %s", p.config.Host)
+		logging.Info("MQTT: Connected to broker %s", p.config.Host)
 
 		// Re-asserted on every (re)connection: after a drop it is the
 		// "offline" will that sits retained on the broker.
 		if token := client.Publish(availabilityTopic, 0, true, availabilityOnline); token.Wait() && token.Error() != nil {
-			log.Printf("MQTT: Failed to announce availability: %v", token.Error())
+			logging.Error("MQTT: Failed to announce availability: %v", token.Error())
 		}
 	})
 
 	// Create and connect client
 	p.client = mqtt.NewClient(opts)
 	if token := p.client.Connect(); token.Wait() && token.Error() != nil {
-		log.Printf("MQTT: Failed to connect to broker %s: %v", p.config.Host, token.Error())
+		logging.Error("MQTT: Failed to connect to broker %s: %v", p.config.Host, token.Error())
 		p.enabled = false
 	}
 }
@@ -134,7 +134,7 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 
 	shouldPublish, reason := p.shouldPublish(event)
 	if !shouldPublish {
-		log.Printf("MQTT: Skipping publish for 0x%04X (%s): %s", event.Address, alias, reason)
+		logging.Warn("MQTT: Skipping publish for 0x%04X (%s): %s", event.Address, alias, reason)
 		return
 	}
 
@@ -171,7 +171,7 @@ func (p *Publisher) shouldPublish(event viessmann.CacheEvent) (bool, string) {
 	// Check if enough time has passed since last publication
 	threshold, err := p.config.GetRefreshThresholdDuration()
 	if err != nil {
-		log.Printf("MQTT: Invalid refresh threshold, using default 1h: %v", err)
+		logging.Warn("MQTT: Invalid refresh threshold, using default 1h: %v", err)
 		threshold = time.Hour
 	}
 
@@ -217,7 +217,7 @@ func (p *Publisher) cleanValueForHomeAssistant(value string) string {
 // publishValue publishes a value to MQTT
 func (p *Publisher) publishValue(topic, value string, address uint16, alias string) {
 	if p.client == nil || !p.client.IsConnected() {
-		log.Printf("MQTT: Cannot publish %s = '%s' - client not connected", topic, value)
+		logging.Error("MQTT: Cannot publish %s = '%s' - client not connected", topic, value)
 		return
 	}
 
@@ -227,11 +227,11 @@ func (p *Publisher) publishValue(topic, value string, address uint16, alias stri
 	// Publish with QoS 0 (at most once delivery) and retain flag set to true
 	token := p.client.Publish(topic, 0, true, cleanedValue)
 	if token.Wait() && token.Error() != nil {
-		log.Printf("MQTT: Failed to publish %s = '%s': %v", topic, cleanedValue, token.Error())
+		logging.Error("MQTT: Failed to publish %s = '%s': %v", topic, cleanedValue, token.Error())
 		return
 	}
 
-	log.Printf("MQTT PUBLISHED: %s = '%s' (0x%04X -> %s) [cleaned from: '%s']", topic, cleanedValue, address, alias, value)
+	logging.Info("MQTT PUBLISHED: %s = '%s' (0x%04X -> %s) [cleaned from: '%s']", topic, cleanedValue, address, alias, value)
 
 	// A reading just changed, so anything derived from it may have too.
 	if p.derived != nil {
@@ -247,7 +247,7 @@ func (p *Publisher) UpdateConfig(newConfig *config.MQTTConfig) {
 
 	// Disconnect existing client if any
 	if p.client != nil && p.client.IsConnected() {
-		log.Printf("MQTT: Disconnecting existing client for config update")
+		logging.Info("MQTT: Disconnecting existing client for config update")
 		p.client.Disconnect(250)
 	}
 
@@ -261,7 +261,7 @@ func (p *Publisher) UpdateConfig(newConfig *config.MQTTConfig) {
 			if hexAddr, err := config.ParseHexAddress(addr.Address); err == nil {
 				p.addressMap[hexAddr] = addr.Alias
 			} else {
-				log.Printf("MQTT: Invalid address '%s' ignored: %v", addr.Address, err)
+				logging.Warn("MQTT: Invalid address '%s' ignored: %v", addr.Address, err)
 			}
 		}
 
@@ -271,7 +271,7 @@ func (p *Publisher) UpdateConfig(newConfig *config.MQTTConfig) {
 		}
 	}
 
-	log.Printf("MQTT Publisher updated: enabled=%t, %d addresses monitored", p.enabled, len(p.addressMap))
+	logging.Info("MQTT Publisher updated: enabled=%t, %d addresses monitored", p.enabled, len(p.addressMap))
 }
 
 // GetStatus returns the current status of the MQTT publisher

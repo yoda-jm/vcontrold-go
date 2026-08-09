@@ -3,7 +3,7 @@ package mqtt
 
 import (
 	"fmt"
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 
 	"github.com/yourusername/vcontrold-go/internal/config"
 	"github.com/yourusername/vcontrold-go/internal/xml"
@@ -127,7 +127,7 @@ func (p *Publisher) PublishDiscovery() error {
 	for _, addr := range p.config.Addresses {
 		component, objectID, payload, err := p.buildSensorPayload(addr)
 		if err != nil {
-			log.Printf("MQTT discovery: skipping %q: %v", addr.Address, err)
+			logging.Warn("MQTT discovery: skipping %q: %v", addr.Address, err)
 			continue
 		}
 		if p.publishDiscovery(component, objectID, payload) {
@@ -135,7 +135,7 @@ func (p *Publisher) PublishDiscovery() error {
 		}
 	}
 
-	log.Printf("MQTT discovery: published %d retained entity definitions", published)
+	logging.Info("MQTT discovery: published %d retained entity definitions", published)
 	return nil
 }
 

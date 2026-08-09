@@ -2,7 +2,7 @@
 package mqtt
 
 import (
-	"log"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"strconv"
 	"sync"
 
@@ -102,10 +102,10 @@ func (p *Publisher) publishDerived() {
 
 		topic := p.stateTopic(d.Alias)
 		if token := p.client.Publish(topic, 0, true, payload); token.Wait() && token.Error() != nil {
-			log.Printf("MQTT derived: failed to publish %s: %v", topic, token.Error())
+			logging.Error("MQTT derived: failed to publish %s: %v", topic, token.Error())
 			continue
 		}
-		log.Printf("MQTT DERIVED: %s = %s", topic, payload)
+		logging.Info("MQTT DERIVED: %s = %s", topic, payload)
 	}
 }
 
@@ -130,7 +130,7 @@ func (p *Publisher) PublishDerivedDiscovery(derived []config.MQTTDerivedConfig) 
 	for _, d := range derived {
 		objectID := sanitizeObjectID(d.Alias)
 		if objectID == "" {
-			log.Printf("MQTT derived: alias %q yields an empty object id, skipping", d.Alias)
+			logging.Warn("MQTT derived: alias %q yields an empty object id, skipping", d.Alias)
 			continue
 		}
 

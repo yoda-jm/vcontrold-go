@@ -3,13 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/yourusername/vcontrold-go/internal/config"
 	"github.com/yourusername/vcontrold-go/internal/errors"
+	"github.com/yourusername/vcontrold-go/internal/logging"
 	"github.com/yourusername/vcontrold-go/internal/viessmann"
 	"github.com/yourusername/vcontrold-go/internal/web"
 	"github.com/yourusername/vcontrold-go/internal/xml"
@@ -32,6 +32,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Apply the log level before anything else speaks, so -verbose covers
+	// startup too and not merely what happens after it.
+	applyLogLevel(cfg)
+
 	// Missing community XML degrades formatting without preventing reads, so a
 	// warning is enough.
 	if err := initializeXMLSystems(cfg); err != nil {
@@ -41,17 +45,20 @@ func main() {
 	// Overrides, though, carry read lengths. Ignoring them quietly would
 	// republish truncated counters, so stop instead.
 	if err := xml.LoadAddressMappingOverrides(cfg.VitoOverridesXML); err != nil {
-		log.Fatalf("Failed to apply address overrides: %v", err)
+		logging.Error("Failed to apply address overrides: %v", err)
+		os.Exit(1)
 	}
 
 	reader, err := initializeReader(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize reader: %v", err)
+		logging.Error("Failed to initialize reader: %v", err)
+		os.Exit(1)
 	}
 	defer reader.Close()
 
 	if err := runApplication(reader, cfg, probe); err != nil {
-		log.Fatalf("Application error: %v", err)
+		logging.Error("Application error: %v", err)
+		os.Exit(1)
 	}
 }
 
@@ -169,7 +176,8 @@ func parseConfiguration() (*config.Config, singleRead, error) {
 	flag.StringVar(&cfg.VitoOverridesXML, "vito-overrides-xml", "", "Path to machine-specific address overrides applied over vito.xml")
 	flag.StringVar(&cfg.WebPort, "port", "8080", "HTTP server port")
 	flag.BoolVar(&cfg.WebMode, "web", false, "Start web server instead of CLI")
-	flag.BoolVar(&cfg.Verbose, "verbose", false, "Show verbose output")
+	flag.BoolVar(&cfg.Verbose, "verbose", false, "Shorthand for -log-level debug")
+	flag.StringVar(&cfg.LogLevel, "log-level", "", "Log level: debug, info, warn or error (default info)")
 
 	// Single parameter reading mode
 	var probe singleRead
@@ -196,6 +204,9 @@ func parseConfiguration() (*config.Config, singleRead, error) {
 		cfg.WebPort = yamlConfig.WebPort
 		cfg.WebMode = yamlConfig.WebMode
 		cfg.Verbose = yamlConfig.Verbose
+		if yamlConfig.LogLevel != "" {
+			cfg.LogLevel = yamlConfig.LogLevel
+		}
 		cfg.YamlConfigFile = yamlConfigFile
 		cfg.YamlConfig = yamlConfig
 	}
@@ -259,6 +270,11 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 		return nil, errors.Wrap(errors.ErrCommunication, "failed to create Viessmann reader", err)
 	}
 
+	// Ask the controller what it is before trusting any address list. A
+	// mismatch here explains every later failure at once, which is cheaper
+	// than watching parameters fail one by one.
+	reportDeviceIdentity(reader)
+
 	// Two possible sources for data points. A DP_Listen datapoint list is still
 	// accepted when supplied, but it exists on no public upstream branch, so by
 	// default everything is derived from vito.xml, using the addresses the YAML
@@ -286,9 +302,9 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 	// Setup auto refresh if YAML config is available
 	if cfg.YamlConfig != nil && cfg.YamlConfig.AutoRefresh.Enabled {
 		if err := reader.SetupAutoRefresh(&cfg.YamlConfig.AutoRefresh); err != nil {
-			log.Printf("Warning: Failed to setup auto refresh: %v", err)
+			logging.Info("Warning: Failed to setup auto refresh: %v", err)
 		} else {
-			log.Printf("Auto refresh configured for %d addresses every %s",
+			logging.Info("Auto refresh configured for %d addresses every %s",
 				len(cfg.YamlConfig.AutoRefresh.Addresses), cfg.YamlConfig.AutoRefresh.Interval)
 		}
 	}
@@ -296,7 +312,7 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 	// Setup multi-group refresh if YAML config has refresh groups
 	if cfg.YamlConfig != nil && len(cfg.YamlConfig.RefreshGroups) > 0 {
 		if err := reader.SetupMultiGroupRefresh(cfg.YamlConfig.RefreshGroups); err != nil {
-			log.Printf("Warning: Failed to setup multi-group refresh: %v", err)
+			logging.Info("Warning: Failed to setup multi-group refresh: %v", err)
 		} else {
 			enabledGroups := 0
 			totalAddresses := 0
@@ -306,7 +322,7 @@ func initializeReader(cfg *config.Config) (*viessmann.Reader, error) {
 					totalAddresses += len(group.Addresses)
 				}
 			}
-			log.Printf("Multi-group refresh configured: %d enabled groups with %d total addresses",
+			logging.Info("Multi-group refresh configured: %d enabled groups with %d total addresses",
 				enabledGroups, totalAddresses)
 		}
 	}
@@ -359,4 +375,46 @@ func runCLIMode(reader *viessmann.Reader, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// reportDeviceIdentity logs what the controller says it is, and how much that
+// identification is worth.
+//
+// Never fatal: an unrecognised controller may still read perfectly well, since
+// the KW protocol does not vary between them. What matters is that the operator
+// is told which of the two situations they are in.
+func reportDeviceIdentity(reader *viessmann.Reader) {
+	info, err := viessmann.IdentifyDevice(reader.GetSerialComm())
+	if err != nil {
+		logging.Info("Device identification failed: %v", err)
+		logging.Info("Continuing anyway; if the readings look wrong, the link itself is the first suspect.")
+		return
+	}
+
+	logging.Info("Controller: %s", info.Describe())
+	if info.Notes != "" {
+		logging.Info("  %s", info.Notes)
+	}
+
+	if info.Support != viessmann.SupportVerified {
+		logging.Info("  This project has only been verified against the V200KW2 (0x2098). " +
+			"Treat readings from this controller as unconfirmed.")
+	}
+}
+
+// applyLogLevel turns the configuration into the shared logger's threshold.
+//
+// -verbose stays as a shorthand for debug, because it is what the flag has
+// always meant here; log_level is the finer control.
+func applyLogLevel(cfg *config.Config) {
+	name := cfg.LogLevel
+	if cfg.Verbose && name == "" {
+		name = "debug"
+	}
+
+	level, err := logging.ParseLevel(name)
+	if err != nil {
+		logging.Warn("%v; falling back to info", err)
+	}
+	logging.SetLevel(level)
 }
