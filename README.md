@@ -1,40 +1,198 @@
 # vcontrold-go
 
-A modern Go-based monitoring and control system for Viessmann V200KW2 heating systems using the KW2 protocol.
+Read and control a Viessmann heating controller over the Optolink serial
+interface, and publish it to MQTT with Home Assistant auto-discovery.
+
+This is a Go implementation of the KW2 protocol, alongside the C
+[openv/vcontrold](https://github.com/openv/vcontrold) that documents it. It is
+not a port: it reuses the community's XML — the protocol truth lives there — and
+adds a single static binary, MQTT discovery that survives a Home Assistant
+restart, and readings that refuse to lie about their own uncertainty.
+
+---
+
+## What is tested, and what is guessed
+
+**This matters more than any feature list.** The project was written against one
+boiler in one house. Everything below is labelled accordingly, and the daemon
+tells you at startup which case you are in.
+
+| Controller | ID | Status | What that means |
+|---|---|---|---|
+| **Vitotronic 200 KW2** | `0x2098` | **Verified** | Reads *and* writes exercised on real hardware (Vitola 200 VB2A). The counters, the setpoints, the write path — all confirmed against the appliance. |
+| Vitotronic 200 KW1 | `0x2094` | Inferred | Same KW protocol and address list per the community XML. Never run here. |
+| V200WB2 | `0x2053` | Inferred | The community XML routes it through GWG_VBEM, a different protocol. Reads are unlikely to work as-is. |
+| VScotHO1 | `0x20CB` | Inferred | Listed as KW,300. This project speaks KW only. |
+| anything else | — | Unknown | The KW protocol does not vary, so reads may work; no address list has been checked. |
+
+"Inferred" means: transcribed from `vito.xml`, plausible, and completely
+untested. If you run this against one of those, the readings are hypotheses
+until you check a few by hand. Reports are welcome — that is how the table
+grows.
+
+At startup:
+
+```
+[2026-08-09 10:46:34] INFO  Controller: V200KW2 ID=0x2098 (support: verified)
+```
+
+### Where the guessing is dangerous
+
+Two failure modes produce *plausible but wrong* numbers rather than errors, and
+both were found on real hardware:
+
+1. **`vito.xml` can understate a length.** It declares `getBrennerStarts`
+   (`0x088A`) as two bytes; on this appliance the counter is four. Read short it
+   reported 9707 instead of 206315 — the truncated low word, which looks like a
+   perfectly reasonable number. See [`overrides/`](overrides/).
+
+2. **A missing sensor is not an error.** The controller returns a reserved
+   value: `FF`/`FF FF` for a datapoint the appliance does not have, `FF 7F`
+   (`0x7FFF`) for a sensor that is not connected. Published as-is those became
+   **6553.5 °C** and **3276.7 °C**. The daemon now recognises both and reports
+   the datapoint as unavailable instead.
+
+Both patterns are documented by the community's own reference profile,
+`doc/examples/sim-2098.ini`, which lists exactly which datapoints a V200KW2 does
+not carry.
+
+---
 
 ## Features
 
-- **KW2 Protocol Support**: Native implementation of the Viessmann KW2 communication protocol
-- **Multi-Source Unit Detection**: Intelligent unit detection using three sources:
-  - `vito.xml`: Exact address mappings from Viessmann configuration
-  - Parameter name inference: Smart detection based on parameter names
-  - Address pattern matching: Fallback detection using known address ranges
-- **Advanced Decoding**: Proper decoding of complex Viessmann data formats:
-  - **CycleTime**: Heating/cooling schedule decoding with exact bit manipulation
-  - **ErrorState**: Error history with timestamps (BCD timestamp decoding)
-  - **Temperature**: Multi-precision temperature readings (V/10, V/2, etc.)
-  - **Enums**: Status codes, operating modes, error codes with human-readable text
-- **Web Interface**: Modern Bootstrap 5 web interface with:
-  - Real-time parameter monitoring
-  - Auto-refresh functionality
-  - XML status indicators
-  - Categorized parameter display sorted by address
-  - Success rate statistics
-- **XML Integration**: Full support for vcontrold ecosystem XML files:
-  - `vcontrold.xml`: Unit definitions and conversions
-  - `vito.xml`: Address mappings and parameter definitions
-- **MQTT Ready**: Placeholder implementation for Home Assistant integration
-- **Extensible Architecture**: Clean, modular Go code structure
+- **KW2 protocol** over Optolink (4800 baud, 8N2, even parity), built from the
+  macros in `vcontrold.xml` rather than hard-coded opcodes.
+- **MQTT with Home Assistant discovery** — retained, so entities survive a
+  restart, and carrying the `state_class` that keeps history alive.
+- **Climate entities** for the setpoints the controller actually exposes.
+- **Machine-specific overrides** applied on top of the community XML, never
+  modifying it, so `make deps` stays safe.
+- **Availability topic** with a last will, so a dead daemon shows as unavailable
+  rather than as a stale reading.
+- **Frame-level tracing** at debug level, for checking a value by hand.
+- Single static binary, no runtime dependencies.
 
-## Installation
+---
 
-### Prerequisites
+## Quick start
 
-- Go 1.23 or later
-- Serial access to Viessmann V200KW2 heating system
-- vcontrold XML configuration files
+```bash
+make deps                       # fetch the community XML into third_party/
+cp config.example.yaml config-openv.yaml
+$EDITOR config-openv.yaml       # serial device, MQTT broker, credentials
+make build
+./vcontrold-go --yaml-config config-openv.yaml
+```
 
-### Development
+The serial device needs the `dialout` group:
+
+```bash
+sudo usermod -aG dialout "$USER"   # then log out and back in
+```
+
+> **`web: true` is mandatory for MQTT.** Publishing is carried by the web
+> server; in CLI mode the daemon reads once and exits without publishing
+> anything. This surprises everyone once.
+
+### Reading a single address
+
+```bash
+./vcontrold-go --yaml-config config-openv.yaml -address 0x08A7
+./vcontrold-go --yaml-config config-openv.yaml -address 0x088A -size 4
+```
+
+`-size` overrides the length from `vito.xml`, which is how the four-byte counter
+above was discovered.
+
+### Checking the write path safely
+
+```bash
+make verify-write ADDR=0x6300
+```
+
+Reads the setpoint, writes the same bytes back, checks the `00` status, reads
+again. The value never changes, but it proves the SETADDR frame is accepted —
+something no unit test can establish.
+
+---
+
+## Configuration
+
+See [`config.example.yaml`](config.example.yaml); it is the deployed
+configuration with credentials removed, and it is commented throughout.
+
+### On the German identifiers
+
+`getTempWWsoll`, `getBetriebArtM1`, `soll`, `ist`, `WW` — these are not our
+names. They are the command names in the community `vito.xml`, and keeping them
+is what lets any address here be traced back to the upstream XML and to the
+openv documentation. Only the `friendly_name` fields are translated, because
+those are what Home Assistant displays.
+
+| Term | Meaning |
+|---|---|
+| `soll` | setpoint (target) |
+| `ist` | actual (measured) |
+| `WW` (Warmwasser) | domestic hot water |
+| `Betriebsart` | operating mode |
+| `Kessel` | boiler |
+| `Vorlauf` | flow |
+| `Brenner` | burner |
+| `Neigung` / `Niveau` | heating curve slope / level |
+
+### Address overrides
+
+`vito.xml` describes a family of appliances, not one specimen. Overrides are
+applied on top of it, so `make deps` can refresh the community XML without
+losing what was measured locally:
+
+```xml
+<command name="getBrennerStarts" protocmd="getaddr">
+  <addr>088A</addr>
+  <len>4</len>          <!-- vito.xml says 2; this counter is really 4 bytes -->
+  <unit>CO</unit>
+</command>
+```
+
+Every override should cite the measurement that justifies it. A guessed length
+is how the truncated counter happened in the first place.
+
+---
+
+## MQTT and Home Assistant
+
+Values are published retained to `<topic_root>/<alias>`, and each monitored
+address also gets a retained discovery message under `homeassistant/`.
+
+**`state_class` is the field that matters.** Without it Home Assistant keeps the
+entity out of long-term statistics and the history disappears with the recorder
+purge, ten days by default. It is derived from the `vito.xml` unit —
+`total_increasing` for counters, `measurement` for temperatures — and can be
+overridden per address.
+
+The broker account needs to write both trees, and Home Assistant needs to read
+the state tree. With mosquitto:
+
+```
+user vcontrold
+topic readwrite openv/#
+topic write homeassistant/#
+
+user homeassistant
+topic read openv/#
+```
+
+> A mosquitto account that exists in `passwd` but has **no entry** in `aclfile`
+> is denied everything, and in MQTT 3.1.1 the PUBACK is indistinguishable from
+> success. Use `mosquitto_pub -V 5` to see the real reason code: `135` is Not
+> authorized, `16` is accepted with no subscriber.
+
+A ready-made dashboard view is in
+[`config/home_assistant_vitola.yaml`](config/home_assistant_vitola.yaml).
+
+---
+
+## Development
 
 ```bash
 make lint        # gofmt + go vet + staticcheck (pinned version)
@@ -44,425 +202,91 @@ make cover       # coverage per package
 make tools       # install the pinned lint tooling
 ```
 
-`make deps` must have run before the tests: several of them read the community
-`vito.xml` and skip without it, which would quietly hollow out the run.
+`make deps` must run first: several tests read the community `vito.xml` and skip
+without it, which would quietly hollow out the run.
 
-The unit tests deliberately assert the things that fail *silently* on real
-hardware — a discovery payload missing its `state_class`, a setpoint encoded on
-two bytes instead of one, a reserved "no data" value published as a
-measurement. None of those surface as a crash; they surface as wrong history
-weeks later.
+The tests deliberately assert what fails *silently* on real hardware — a
+discovery payload missing its `state_class`, a setpoint encoded on two bytes
+instead of one, a reserved "no data" value published as a measurement. None of
+those surface as a crash; they surface as wrong history weeks later.
 
-### Building
-
-```bash
-git clone https://github.com/yourusername/vcontrold-go.git
-cd vcontrold-go
-
-# Build using Makefile (recommended)
-make build
-
-# Or build directly with go
-go build ./cmd/vcontrold-go
-```
-
-## Usage
-
-### Command Line Options
+### Debugging
 
 ```bash
-./vcontrold-go [options]
+./vcontrold-go --yaml-config config-openv.yaml -log-level debug
 ```
 
-**Options:**
-- `-device string`: Serial device to use (default "/dev/ttyUSB0")
-- `-config string`: V200KW2 configuration file to parse (optional)
-- `-vcontrol-xml string`: Path to vcontrold.xml unit definitions (default "xml/vcontrold.xml")
-- `-vito-xml string`: Path to vito.xml address mappings (default "xml/vito.xml")
-- `-vito-overrides-xml string`: Machine-specific address overrides applied on top of vito.xml
-- `-yaml-config string`: YAML configuration file — **required for MQTT and refresh groups**
-- `-address string`: Read a single parameter by hex address, e.g. `0x08A7`
-- `-size int`: Override the read length for `-address` (0 = take it from vito.xml)
-- `-port string`: HTTP server port (default "8080")
-- `-web`: Start web server instead of CLI
-- `-verbose`: Show verbose output
-
-Note that `-config` and `-yaml-config` are different things: `-config` is a
-`DP_Listen` datapoint list, while `-yaml-config` is this project's own
-configuration. Only the latter enables MQTT.
-
-### Address overrides
-
-`vito.xml` describes a family of appliances, not one specimen, and some of its
-lengths are wrong for a given machine. Overrides are applied on top of it so
-that `make deps` can refresh the community XML without losing local findings:
-
-```xml
-<!-- overrides/vitola200-kw2.xml -->
-<command name="getBrennerStarts" protocmd="getaddr">
-  <addr>088A</addr>
-  <len>4</len>          <!-- vito.xml says 2; the counter is really 4 bytes -->
-  <unit>CO</unit>
-</command>
-```
-
-Read on 2 bytes that counter reports 9707 — the truncated low word of 206315.
-Every override must cite the measurement that justifies it.
-
-### Web Interface Mode
-
-Start the web server:
-
-```bash
-# Using the built binary
-./build/vcontrold-go -web -config example_config.txt
-
-# Or using make for development
-make dev
-```
-
-Then open your browser to `http://localhost:8080`
-
-### CLI Mode
-
-Read all parameters once:
-
-```bash
-./build/vcontrold-go -config example_config.txt
-```
-
-### Configuration File Format
-
-The configuration file defines which parameters to read:
+Every serial frame is traced, so a value can be verified by hand:
 
 ```
-# Parameter configuration file for V200KW2
-# Format: name address size datatype [additional_fields]
-
-"Kesseltemperatur" 0x0802 2 SInt
-"Aussentemperatur" 0x5525 2 SInt  
-"Betriebsart HK1" 0x2301 1 Byte
-"Warmwassertemperatur" 0x0804 2 SInt
-"Heizkreispumpe HK1" 0x2906 1 Byte
+[2026-08-09 10:46:36] DEBUG serial: read  0x0800 -> 01 F7 08 00 02
+[2026-08-09 10:46:36] DEBUG serial: read  0x0800 <- 13 01
+[2026-08-09 10:46:36] DEBUG viessmann: Successfully read getTempA: 27.5 Grad Celsius
 ```
 
-**Fields:**
-- `name`: Human-readable parameter name (quoted if contains spaces)
-- `address`: Memory address in hex format (0xXXXX)
-- `size`: Number of bytes to read
-- `datatype`: Data type (`Byte`, `SInt`, `Int`, `Int4`, `Array`)
+`13 01` little-endian is `0x0113` = 275, and unit `UT` is `V/10`, so 27.5 °C.
 
-## XML Configuration
-
-### vcontrold.xml
-
-Defines unit conversions and enums:
-
-```xml
-<units>
-  <unit name="Temperatur">
-    <calc get="V/10"/>
-    <entity>°C</entity>
-  </unit>
-  
-  <unit name="BetriebsArt">
-    <type>enum</type>
-    <enum bytes="00" text="ABSCHALT"/>
-    <enum bytes="01" text="HEIZEN"/>
-    <enum bytes="02" text="REDUZ"/>
-  </unit>
-</units>
-```
-
-### vito.xml
-
-Maps addresses to unit types:
-
-```xml
-<commands>
-  <command name="getKesseltemp" protocmd="getaddr">
-    <addr>0802</addr>
-    <len>2</len>
-    <unit>UT</unit>
-    <description>Kesseltemperatur</description>
-  </command>
-</commands>
-```
-
-## Supported Data Types
-
-### Temperature Readings
-- **Standard Temperature** (`UT`): Signed 16-bit, divided by 10 (±3276.7°C range)
-- **1-Byte Temperature** (`UT1`): Unsigned 8-bit, divided by 2 (±127.5°C range) 
-- **Integer Temperature** (`UTI`): Raw integer temperature values
-
-### Status and Control
-- **Operating Modes** (`BA`): Enum values (OFF, HEATING, REDUCED, etc.)
-- **Status Fields** (`ST`, `RT`): Various status enums
-- **Error States** (`ES`): Error codes with descriptive text
-
-### Specialized Formats
-- **CycleTime** (`CT`): Heating schedules with ON/OFF times
-- **Error History**: 9-byte format with error code + BCD timestamp
-- **System Time** (`TI`): BCD-encoded date/time values
-- **Counters**: Operating hours, start counts, etc.
-
-## Error History Decoding
-
-The system automatically detects and decodes error history entries:
-
-```
-Error History Entry 1: 2021-06-06T17:16:48 Brennerstoerung
-Error History Entry 2: 2021-06-05T14:23:15 Kommunikationsfehler
-```
-
-Each entry contains:
-- BCD timestamp (8 bytes)
-- Error code (1 byte) 
-- Human-readable error description from XML
-
-## CycleTime Decoding
-
-Heating schedules are decoded using exact Viessmann bit manipulation:
-
-```
-1:An:06:30  Aus:22:00  2:An:--     Aus:--  3:An:07:00  Aus:23:30
-```
-
-Format: `Slot:On:HH:MM  Off:HH:MM`
-
-## Web Interface
-
-The web interface provides:
-
-- **Real-time Monitoring**: Live parameter values with auto-refresh
-- **XML Status Indicators**: Visual indicators showing which parameters have XML definitions
-- **Categorized Display**: Parameters grouped by type (Temperature, Operating Mode, etc.)
-- **Address Sorting**: Parameters sorted by memory address within each category
-- **Success Statistics**: Real-time success rates and error counts
-- **Mobile Responsive**: Bootstrap 5 responsive design
-
-### XML Status Icons
-- ✓ **Green**: Parameter found in XML with proper unit conversion
-- ? **Red**: Parameter not in XML, using inference or fallback
-
-## MQTT and Home Assistant
-
-MQTT publishing is carried by the web server. **`web: true` is mandatory** — in
-CLI mode the daemon reads once and exits without ever publishing.
-
-```bash
-./vcontrold-go --yaml-config config-openv.yaml
-```
-
-Values are published retained to `<topic_root>/<alias>`, and each monitored
-address also gets a **retained Home Assistant discovery message** on
-`homeassistant/sensor/<device>/<object>/config`.
-
-The `state_class` in those messages is what matters: without it Home Assistant
-does not keep the entity in long-term statistics, and the history disappears
-with the recorder purge (ten days by default). It is derived from the vito.xml
-unit — `total_increasing` for counters (`CS`, `CO`), `measurement` for
-temperatures (`UT`) — and can be overridden per address in the YAML.
-
-The broker account needs write access on both topic trees, e.g. for mosquitto:
-
-```
-user vcontrol
-topic readwrite openv/#
-topic write homeassistant/#
-```
-
-and the Home Assistant account needs `topic read openv/#`, since the discovery
-messages land under `homeassistant/` but the state topics do not.
-
-## Architecture
-
-```
-cmd/
-├── vcontrold-go/          # Main application entry point
-internal/
-├── config/                # Configuration parsing
-├── viessmann/             # KW2 protocol and reading logic
-├── xml/                   # XML parsing (vcontrold.xml, vito.xml)
-├── web/                   # HTTP server and web interface
-└── mqtt/                  # MQTT client (placeholder)
-```
-
-## Protocol Details
-
-### KW2 Communication
-The KW2 protocol is a proprietary Viessmann protocol using:
-- **Baud Rate**: 4800
-- **Data Bits**: 8
-- **Parity**: Even  
-- **Stop Bits**: 2
-
-### Communication Sequence
-1. **Initialize**: Send `0x04`, expect `0x06`
-2. **Read Command**: `0x01 0xF7 <addr_low> <addr_high> <length>`
-3. **Response**: `<status> <data...> <checksum>`
-
-## Development
-
-### Project Structure
-- `cmd/`: Application entry points
-- `internal/`: Internal packages (not importable by other projects)
-- `pkg/`: Public packages (if any)
-
-### Adding New Unit Types
-1. Add unit definition to `vcontrold.xml`
-2. Add address mapping to `vito.xml` 
-3. Update `ConvertVitoUnitToXMLUnit()` in `internal/xml/vito.go`
-4. Add decoding logic if needed in `internal/viessmann/decoder.go`
-
-### Testing Serial Communication
-
-```bash
-# Test with verbose output
-./vcontrold-go -device /dev/ttyUSB0 -config test.txt -verbose
-
-# Test web interface
-./vcontrold-go -web -device /dev/ttyUSB0 -config test.txt
-```
-
-## Hardware Setup
-
-### Serial Connection
-- **Interface**: RS232 or USB-to-Serial adapter
-- **Connector**: Viessmann Optolink interface
-- **Wiring**: Connect to heating system's optical interface
-
-### Optolink Cable
-The Viessmann Optolink uses an optical interface:
-- IR LED for TX
-- Phototransistor for RX  
-- 5V power supply
-
-## Troubleshooting
-
-### Common Issues
-
-**Serial Port Access**:
-```bash
-# Add user to dialout group
-sudo usermod -a -G dialout $USER
-# Logout and login again
-
-# Check device permissions
-ls -l /dev/ttyUSB0
-```
-
-**Communication Errors**:
-- Verify baud rate (4800)
-- Check cable connections
-- Ensure heating system is accessible
-- Try different USB ports
-
-**XML Loading Issues**:
-- Verify XML file paths
-- Check XML syntax
-- Ensure files are readable
-
-**Web Interface Issues**:
-- Check port availability (default 8080)
-- Verify firewall settings
-- Check console for JavaScript errors
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Viessmann for the V200KW2 heating system
-- The vcontrold project for XML configuration format inspiration
-- The Go community for excellent libraries and tools
-
-## Supported Systems
-
-### Tested Hardware
-- **Viessmann V200KW2**: Primary target system
-- **Serial Adapters**: FTDI-based USB-to-Serial converters
-- **Platforms**: Linux (primary), should work on Windows/macOS
-
-### Compatibility
-The system should work with other Viessmann systems using KW2 protocol, but parameter addresses and formats may vary. XML configuration files would need to be adapted for other models.
-
-## Performance
-
-- **Reading Speed**: ~2-3 seconds per parameter (limited by KW2 protocol)
-- **Memory Usage**: <10MB typical usage
-- **CPU Usage**: Minimal when idle, low during reading
-- **Concurrent Access**: Serial access is mutex-protected
-
-## Security Considerations
-
-- **Serial Access**: Requires appropriate system permissions
-- **Web Interface**: No authentication (add reverse proxy if needed)
-- **MQTT**: Will support authentication when implemented
-- **Local Access**: Designed for trusted local networks
+Levels: `debug`, `info` (default), `warn`, `error`. `-verbose` is shorthand for
+`debug`.
 
 ---
 
-## État du projet (8 août 2026)
+## Deployment
 
-Revue de code effectuée par comparaison avec l'implémentation de référence en C
-(`openv/vcontrold`). **Voir [PLAN.md](PLAN.md) pour le plan d'action détaillé.**
+`make deploy` sends the binary, configuration and overrides to the target host
+named in `.env`; `deploy/vcontrold-go.service` is a systemd template.
 
-| | |
-|---|---|
-| Lecture KW2 | conforme à la référence C, octet pour octet |
-| Écriture KW2 | **cassée** — mauvais opcode, checksum parasite, mauvais ack |
-| Conversions d'unités | correctes (`V/3600`, enums), mais dupliquées en dur |
-| Publication MQTT | 3 adresses seulement, sans `state_class` |
+For a user service, `loginctl enable-linger` is required to survive a reboot —
+and note that the user manager keeps the groups of the session that started it,
+so after adding yourself to `dialout` it must be restarted or the serial port
+stays "Permission denied" while `id` says otherwise.
 
-## Démarrage rapide
+---
 
-```bash
-cp .env.example .env                      # renseigner MQTT + machine cible
-cp config.example.yaml config-openv.yaml  # adapter device et adresses
-make deps                                 # XML communautaires -> third_party/
-make build && make test
+## Protocol notes
+
+Read and write both come from the `<protocol name="KW2">` macros:
+
+```xml
+<macro name="SYNC">    <command>SEND 04;WAIT 05</command></macro>
+<macro name="GETADDR"> <command>SEND 01 F7</command></macro>
+<macro name="SETADDR"> <command>SEND 01 F4</command></macro>
 ```
 
-**Aucun secret dans ce dépôt.** `.env`, `config-openv.yaml` et `third_party/`
-sont gitignorés. Voir [CLAUDE.md](CLAUDE.md) pour les conventions de travail.
+Three things worth knowing, each of which cost a bug here:
 
-### Matériel et déploiement
+- **KW carries no checksum.** That belongs to P300. A write is
+  `01 F4 <addr_hi> <addr_lo> <len> <data…>` and nothing more.
+- **A write answers with a status byte**, unit `SR`: `00` is OK, `05` is
+  NOT OK — not the `05` acknowledgement that ends the SYNC.
+- **The controller emits its `05` intermittently.** Bounding a read by a number
+  of attempts fails on a healthy link; bound it by elapsed time. Back-to-back
+  transactions also need a short rest, or parallel refresh groups desynchronise
+  the controller.
 
-Chaudière **Viessmann Vitola 200 VB2A**, régulation **Vitotronic 200 KW2**,
-interface optique **Optolink** en USB.
+---
 
-On développe sur le poste de travail, on exécute sur la machine où la sonde est
-branchée :
+## Contributing
 
-```bash
-make deploy       # rsync binaire + config + XML
-make run-remote
-make probe        # verifie la detection de l'adaptateur
-```
+Useful contributions, roughly in order of value:
 
-### Dépendances externes
+1. **Reports from other controllers.** The support table above is thin because
+   it is honest. `-log-level debug` output plus the startup identification line
+   is enough to add a row.
+2. **Overrides with evidence.** A length or unit that differs on your appliance,
+   with the reading that shows it.
+3. Anything that makes a wrong value *fail* rather than publish.
 
-`scripts/bootstrap.sh` récupère dans `third_party/`, à des révisions épinglées :
+Keep the distinction between measured and assumed: a comment saying which one a
+value is worth more than the value itself.
 
-- **`openv/vcontrold`** — `xml/kw/vcontrold.xml` (unités, macros de protocole)
-  et `xml/kw/vito.xml` (adresses, longueurs). **Ces fichiers font autorité sur
-  le protocole** : ne rien coder en dur qui s'y trouve déjà.
-- **`philippoo66/optolink-splitter`** — liste de datapoints.
-  *`DP_Listen_2.zip` n'est pas versionné en amont — voir PLAN.md, tâche 7.*
+## License
 
-### Piège connu
+See [LICENSE](LICENSE).
 
-Le port série n'est pas garanti sur `/dev/ttyUSB1` d'un branchement à l'autre.
-Préférer `ls -l /dev/serial/by-id/`, et vérifier l'appartenance au groupe
-`dialout` — cause numéro un des « permission denied ».
+## Acknowledgments
+
+[openv/vcontrold](https://github.com/openv/vcontrold) for the protocol
+documentation and the XML that carries it, and
+[philippoo66/optolink-splitter](https://github.com/philippoo66/optolink-splitter)
+for the datapoint work.

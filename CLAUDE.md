@@ -1,88 +1,108 @@
-# Conventions de travail
+# Working on this repository
 
-Ce fichier est chargé automatiquement par Claude Code. Il décrit **comment on
-travaille sur ce dépôt** ; le *quoi faire* est dans [PLAN.md](PLAN.md).
+This file describes **how work is done here**. It is loaded automatically by
+Claude Code, but it is written for anyone.
 
-## Le montage physique
+## The physical setup
 
-Deux machines, et c'est structurant :
+Two machines, and that shapes everything:
 
-| | Rôle |
+| | Role |
 |---|---|
-| **Poste de développement** | on écrit, on compile, on teste unitairement |
-| **Machine cible** | l'Optolink USB y est branché ; c'est la seule qui parle à la chaudière |
+| **Development machine** | where code is written, compiled and unit-tested |
+| **Target machine** | the Optolink USB adapter is plugged in here; the only one that talks to the boiler |
 
-**On ne compile jamais sur la cible.** On construit ici, on envoie, on exécute
-là-bas :
+**Never build on the target.** Build here, ship, run there:
 
 ```bash
-make build          # compilation croisee linux/amd64
-make deploy         # rsync binaire + config + XML
-make run-remote     # execution sur la cible
-make probe          # verifie que l'adaptateur est detecte
+make build        # cross-compile for linux/amd64
+make deploy       # rsync binary + config + overrides
+make run-remote   # run on the target
+make probe        # check the adapter is detected
 ```
 
-Les paramètres viennent de `.env` (voir `.env.example`), surchargeables :
+Parameters come from `.env` (see `.env.example`) and can be overridden:
 `make deploy TARGET_HOST=user@host`.
 
-## Ce qui n'est pas dans le dépôt
+## What is not in the repository
 
-**Aucun secret, aucune adresse interne.** Trois fichiers sont gitignorés et
-doivent être créés à partir de leur modèle :
+**No secrets, no internal addresses.** Three paths are gitignored and must be
+created from their templates:
 
-| Fichier réel | Modèle |
+| Real file | Template |
 |---|---|
 | `.env` | `.env.example` |
 | `config-openv.yaml` | `config.example.yaml` |
 | `third_party/` | `make deps` |
 
-Avant tout commit, vérifier qu'aucun identifiant ni adresse RFC1918 ne part :
+Before committing, check nothing leaks:
 
 ```bash
 git diff --cached | grep -niE "password|token|192\.168\.|10\.[0-9]+\." && echo "STOP"
 ```
 
-## Les XML communautaires font autorité
+## The community XML is authoritative
 
-`third_party/vcontrold/xml/kw/` contient `vcontrold.xml` (unités, macros de
-protocole) et `vito.xml` (adresses, longueurs). **Ces fichiers portent la
-vérité du protocole.**
+`third_party/vcontrold/xml/kw/` holds `vcontrold.xml` (units, protocol macros)
+and `vito.xml` (addresses, lengths). **Those files carry the protocol truth.**
 
-Règle : **si une valeur existe dans le XML, ne pas la coder en dur en Go.**
-C'est exactement l'origine du bug d'écriture — l'opcode `0xF4` était dans le
-XML depuis le début, mais le Go avait sa propre constante.
+Rule: **if a value exists in the XML, do not hard-code it in Go.** That is
+exactly where the original write bug came from — the `0xF4` opcode was in the
+XML all along, while the Go code carried its own constant.
 
-Ils sont épinglés à une révision précise dans `scripts/bootstrap.sh`. Les
-remonter est un geste volontaire, jamais un effet de bord.
+They are pinned to a specific revision in `scripts/bootstrap.sh`. Moving that
+revision is a deliberate act, never a side effect.
 
-## Vérifier sur le matériel, pas seulement en test
+When the XML is wrong for a specific appliance, correct it in `overrides/` —
+never by editing the community file, which `make deps` would overwrite.
 
-Les tests unitaires ne prouvent rien sur le protocole série. Toute modification
-touchant `internal/viessmann/serial_communicator.go` doit être validée par une
-lecture réelle :
+## Say what is measured and what is assumed
+
+This is the most important convention here, because the failures that hurt are
+the ones that produce *plausible* numbers rather than errors.
+
+- A value read from real hardware: say so, and give the reading.
+- A value derived from the XML for an appliance nobody has tested: say that too.
+- An override must cite the measurement that justifies it.
+
+`internal/viessmann/device.go` encodes this as support levels. Only the
+V200KW2 (`0x2098`) is `verified`; everything else is `inferred` or `unknown`.
+
+## Verify on hardware, not only in tests
+
+Unit tests prove nothing about the serial protocol. Any change touching
+`internal/viessmann/serial_communicator.go` must be confirmed by a real read:
 
 ```bash
-vclient -h localhost:3002 -c getBrennerStunden1
-vclient -h localhost:3002 -c getBrennerStarts
+./vcontrold-go --yaml-config config-openv.yaml -address 0x08A7   # burner hours
+./vcontrold-go --yaml-config config-openv.yaml -address 0x088A   # burner starts
 ```
 
-**Critère de cohérence** : les démarrages doivent dépasser `196980` (relevé du
-7 octobre 2025). Les heures doivent être cohérentes avec ce nombre de
-démarrages, soit des dizaines de milliers — une valeur de l'ordre de `15`
-signale une conversion fautive.
+**Consistency check**: starts must exceed `196980` (reading of 7 October 2025),
+and hours must be consistent with that count — tens of thousands. A value near
+`15` signals a broken conversion.
 
-## Prudence sur l'écriture
+The daemon holds the serial port, so stop it first:
+`systemctl --user stop vcontrold-go`.
 
-Les commandes `set*` agissent sur une chaudière en service, l'hiver, dans une
-maison habitée. **Ne jamais écrire à l'aveugle.**
+## Care with writes
 
-Protocole : lire la valeur, la réécrire à l'identique, vérifier le retour `00`,
-relire. Seulement ensuite, modifier.
+`set*` commands act on a boiler in service, in a house someone lives in.
+**Never write blind.**
+
+Protocol: read the value, write it back unchanged, check the `00` status, read
+again. Only then change anything. `make verify-write ADDR=0x6300` does exactly
+that.
 
 ## Style
 
-- Messages de commit en français, à l'impératif, et **expliquant le pourquoi**
-  quand le quoi ne suffit pas.
-- Pas de binaire compilé dans le dépôt (`make clean` avant de committer).
-- Les fichiers de travail écartés sont dans `.archive-local/`, gitignoré :
-  rien n'a été supprimé, mais rien n'ira sur GitHub.
+- Code, comments and documentation in **English**. The only exception is the
+  strings Home Assistant displays (`friendly_name`, dashboard labels), which
+  stay French because that interface is French.
+- The German protocol identifiers (`soll`, `ist`, `WW`, `Betriebsart`) are kept
+  as-is: they are the community XML's command names, and renaming them would
+  break the link to upstream documentation.
+- Commit messages in English, imperative mood, explaining **why** when the
+  what is not enough.
+- No compiled binary in the repository (`make clean` before committing).
+- `make lint` must pass: gofmt, go vet and staticcheck.
