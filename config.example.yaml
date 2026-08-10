@@ -60,6 +60,31 @@ refresh_groups:
       - "0x2303"   # party mode
       - "0x2308"   # party setpoint
 
+  # Schedules and fault history. Both change on the scale of months, so they
+  # are read four times a day rather than every minute -- 17 addresses at about
+  # two seconds each is a minute of link time per cycle.
+  - name: Schedules and faults
+    interval: 6h
+    enabled: true
+    addresses:
+      - "0x2200"   # recirculation schedule, Monday
+      - "0x2208"   # Tuesday
+      - "0x2210"   # Wednesday
+      - "0x2218"   # Thursday
+      - "0x2220"   # Friday
+      - "0x2228"   # Saturday
+      - "0x2230"   # Sunday
+      - "0x7507"   # fault history, most recent
+      - "0x7510"
+      - "0x7519"
+      - "0x7522"
+      - "0x752B"
+      - "0x7534"
+      - "0x753D"
+      - "0x7546"
+      - "0x754F"
+      - "0x7558"
+
 mqtt:
   enabled: true
   host: broker.local:1883
@@ -216,6 +241,92 @@ mqtt:
       friendly_name: Mode réception
       component: binary_sensor
       icon: mdi:party-popper
+
+    # --- Recirculation schedule ----------------------------------------------
+    # The loop is programmed 05:30-22:00, seven days a week: 16.5 h a day, not
+    # the 24 h that was assumed. The schedule is what would be narrowed to cut
+    # the standing loss, so it is worth watching for changes.
+    #
+    # No state_class: these are text. The historisable number is the measured
+    # run time already published as pumpZirkuHours, which is worth more than the
+    # programmed hours anyway.
+    - address: "0x2200"
+      alias: timerZirkuLu
+      friendly_name: Bouclage lundi
+      icon: mdi:calendar-clock
+    - address: "0x2208"
+      alias: timerZirkuMa
+      friendly_name: Bouclage mardi
+      icon: mdi:calendar-clock
+    - address: "0x2210"
+      alias: timerZirkuMe
+      friendly_name: Bouclage mercredi
+      icon: mdi:calendar-clock
+    - address: "0x2218"
+      alias: timerZirkuJe
+      friendly_name: Bouclage jeudi
+      icon: mdi:calendar-clock
+    - address: "0x2220"
+      alias: timerZirkuVe
+      friendly_name: Bouclage vendredi
+      icon: mdi:calendar-clock
+    - address: "0x2228"
+      alias: timerZirkuSa
+      friendly_name: Bouclage samedi
+      icon: mdi:calendar-clock
+    - address: "0x2230"
+      alias: timerZirkuDi
+      friendly_name: Bouclage dimanche
+      icon: mdi:calendar-clock
+
+    # --- Fault history -------------------------------------------------------
+    # Ten slots, most recent first. Empty slots report "(empty)" rather than a
+    # fault dated year zero. The three that are filled all hold a burner fault
+    # from June 2021, well before this installation was taken over.
+    #
+    # The schedules for hot water (0x2100) and the heating circuit (0x2000) are
+    # not published: they are readable on demand from the daemon's own page, and
+    # entities that never change are clutter.
+    - address: "0x7507"
+      alias: getError0
+      friendly_name: Défaut 1 (le plus récent)
+      icon: mdi:alert-circle-outline
+    - address: "0x7510"
+      alias: getError1
+      friendly_name: Défaut 2
+      icon: mdi:alert-circle-outline
+    - address: "0x7519"
+      alias: getError2
+      friendly_name: Défaut 3
+      icon: mdi:alert-circle-outline
+    - address: "0x7522"
+      alias: getError3
+      friendly_name: Défaut 4
+      icon: mdi:alert-circle-outline
+    - address: "0x752B"
+      alias: getError4
+      friendly_name: Défaut 5
+      icon: mdi:alert-circle-outline
+    - address: "0x7534"
+      alias: getError5
+      friendly_name: Défaut 6
+      icon: mdi:alert-circle-outline
+    - address: "0x753D"
+      alias: getError6
+      friendly_name: Défaut 7
+      icon: mdi:alert-circle-outline
+    - address: "0x7546"
+      alias: getError7
+      friendly_name: Défaut 8
+      icon: mdi:alert-circle-outline
+    - address: "0x754F"
+      alias: getError8
+      friendly_name: Défaut 9
+      icon: mdi:alert-circle-outline
+    - address: "0x7558"
+      alias: getError9
+      friendly_name: Défaut 10
+      icon: mdi:alert-circle-outline
 
 # Control from Home Assistant.
 #

@@ -15,6 +15,9 @@ import (
 	"github.com/yoda-jm/vcontrold-go/internal/viessmann"
 )
 
+// notInXMLAnnotation matches the marker addXMLStatusAnnotation appends.
+var notInXMLAnnotation = regexp.MustCompile(`\s+\(not in XML\)$`)
+
 // LastPublish tracks when each address was last published to MQTT
 type LastPublish struct {
 	Timestamp time.Time
@@ -222,9 +225,10 @@ func (p *Publisher) cleanValueForHomeAssistant(value string) string {
 	// Remove common suffixes that aren't needed
 	value = strings.TrimSpace(value)
 
-	// Remove unit annotations like " Grad Celsius (not in XML)"
-	re := regexp.MustCompile(`\s+\([^)]*\)$`)
-	value = re.ReplaceAllString(value, "")
+	// Strip only the annotation the formatter adds. Removing any trailing
+	// parenthesis would eat legitimate text: a fault label reads
+	// "Regelbetrieb (kein Fehler)", and losing its tail changes the meaning.
+	value = notInXMLAnnotation.ReplaceAllString(value, "")
 
 	// Remove units for temperature values - extract just the number
 	tempPattern := regexp.MustCompile(`^(-?\d+(?:\.\d+)?)\s+Grad\s+Celsius$`)
