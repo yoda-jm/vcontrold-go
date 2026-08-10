@@ -97,7 +97,9 @@ func (t *runtimeTracker) observe(spec config.MQTTRuntimeConfig, on bool, now tim
 	}
 
 	if gap > maxCreditableGap {
-		logging.Warn("%s: %s since the previous sample, longer than the %s that can "+
+		// Expected after a restart or a spell of failed reads. It is worth
+		// seeing when diagnosing a counter, but it is not a warning.
+		logging.Debug("%s: %s since the previous sample, longer than the %s that can "+
 			"be credited; the interval is skipped rather than assumed",
 			spec.Alias, gap.Truncate(time.Second), maxCreditableGap)
 		return t.seconds[spec.Alias] / 3600, false

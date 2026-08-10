@@ -158,7 +158,10 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 
 	shouldPublish, reason := p.shouldPublish(event)
 	if !shouldPublish {
-		logging.Warn("MQTT: Skipping publish for 0x%04X (%s): %s", event.Address, alias, reason)
+		// Debug, not warn: suppressing an unchanged value is the normal case,
+		// several times a minute. Logging it as a warning buries the real ones
+		// and makes the journal unreadable.
+		logging.Debug("MQTT: Skipping publish for 0x%04X (%s): %s", event.Address, alias, reason)
 		return
 	}
 
