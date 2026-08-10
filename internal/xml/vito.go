@@ -253,6 +253,16 @@ func GetAddressMapping(address uint16) (AddressMappingEntry, bool) {
 	return mapping, true
 }
 
+// GetAllAddressMappings returns every address the XML declares, overrides
+// included. Used to show what the appliance offers beyond what is polled.
+func GetAllAddressMappings() map[uint16]AddressMappingEntry {
+	out := make(map[uint16]AddressMappingEntry, len(globalAddressMappings))
+	for address, mapping := range globalAddressMappings {
+		out[address] = mapping
+	}
+	return out
+}
+
 // GetBestUnitForParameter determines the best unit using all three sources
 func GetBestUnitForParameter(address uint16, paramName string) (string, bool) {
 	info := GetDetailedUnitInfo(address, paramName)

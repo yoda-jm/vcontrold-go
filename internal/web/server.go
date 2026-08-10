@@ -151,6 +151,8 @@ func (s *Server) Start() error {
 	r.HandleFunc("/api/mqtt/hooks/test/{index:[0-9]+}", s.testMqttHookHandler).Methods("POST")
 	r.HandleFunc("/api/events", s.cacheEventsHandler).Methods("GET")
 	r.HandleFunc("/api/device", s.getDeviceHandler).Methods("GET")
+	r.HandleFunc("/api/xml/datapoints", s.getXMLDatapointsHandler).Methods("GET")
+	r.HandleFunc("/api/read/{address}", s.readAddressHandler).Methods("GET")
 
 	r.HandleFunc("/", s.indexHandler).Methods("GET")
 

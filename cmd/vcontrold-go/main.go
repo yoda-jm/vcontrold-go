@@ -205,8 +205,13 @@ func parseConfiguration() (*config.Config, singleRead, error) {
 		cfg.VitoOverridesXML = yamlConfig.VitoOverridesXML
 		cfg.WebPort = yamlConfig.WebPort
 		cfg.WebMode = yamlConfig.WebMode
-		cfg.Verbose = yamlConfig.Verbose
-		if yamlConfig.LogLevel != "" {
+		// The flag wins over the file: someone passing -verbose on the command
+		// line is asking for detail now, and having the configuration quietly
+		// cancel it makes the flag look broken.
+		if !cfg.Verbose {
+			cfg.Verbose = yamlConfig.Verbose
+		}
+		if yamlConfig.LogLevel != "" && cfg.LogLevel == "" {
 			cfg.LogLevel = yamlConfig.LogLevel
 		}
 		cfg.YamlConfigFile = yamlConfigFile

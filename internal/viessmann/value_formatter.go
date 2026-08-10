@@ -37,6 +37,16 @@ func (vf *ValueFormatter) FormatValueWithAllSources(rawValue interface{}, dataTy
 		return "ERROR"
 	}
 
+	// Schedules and fault records are packed structures, not scaled numbers.
+	if mapping, exists := xml.GetAddressMapping(address); exists {
+		switch mapping.Unit {
+		case "CT":
+			return xml.DecodeCycleTime(data)
+		case "ES":
+			return xml.DecodeErrorState(data)
+		}
+	}
+
 	// Get the best unit type using all sources
 	unitType, foundInXML := xml.GetBestUnitForParameter(address, paramName)
 	if unitType == "" {

@@ -98,6 +98,16 @@ td.num, th.num { text-align: right; font-family: var(--mono); }
 .drawer[open] summary::before { content: "\25BE "; }
 .drawer[open] summary { border-bottom: 1px solid var(--line); }
 td.key { color: var(--muted); width: 40%; }
+.badge { color: var(--muted); font-weight: 400; font-size: 12px; }
+button.read {
+  font: inherit; font-size: 12px; padding: 2px 10px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 5px;
+  background: var(--bg); color: var(--ink);
+}
+button.read:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button.read:disabled { opacity: .5; cursor: wait; }
+.result { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.result.bad { color: var(--bad); }
 td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 
 footer { color: var(--muted); font-size: 12.5px; padding: 0 20px 28px; max-width: 1400px; margin: 0 auto; }
@@ -159,6 +169,14 @@ code { font-family: var(--mono); font-size: 12.5px; }
       <table>
         <thead><tr><th>Topic</th><th>Address</th><th>Range</th><th>State</th></tr></thead>
         <tbody id="hooks"></tbody>
+      </table>
+    </details>
+
+    <details class="panel drawer">
+      <summary>Available in vito.xml <span class="badge" id="xml-count"></span></summary>
+      <table>
+        <thead><tr><th>Address</th><th>Name</th><th class="num">Bytes</th><th>Unit</th><th>Read once</th></tr></thead>
+        <tbody id="xmlpoints"></tbody>
       </table>
     </details>
 
@@ -298,9 +316,12 @@ function renderReadings(payload) {
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    const address = reading.address !== undefined
-      ? "0x" + Number(reading.address).toString(16).toUpperCase().padStart(4, "0")
-      : "";
+    const address = reading.address !== undefined ? hex(reading.address) : "";
+    // The age is re-rendered every second by tickAges, independently of the
+    // ten-second poll: otherwise a fresh reading sits at "3s ago" for ten
+    // seconds and the page looks stopped.
+    meta.dataset.seen = seenAt || "";
+    meta.dataset.address = address;
     meta.textContent = [address, ago(seenAt)].filter(Boolean).join(" · ");
 
     card.append(name, value, meta);
@@ -425,6 +446,65 @@ function renderDaemon(config, device) {
   row(body, ["Web port", yaml.web_port || ""], { keyFirst: true });
 }
 
+// Re-render the ages once a second, without touching the network.
+function tickAges() {
+  for (const meta of document.querySelectorAll("#readings .meta")) {
+    const seen = meta.dataset.seen;
+    if (!seen) continue;
+    meta.textContent = [meta.dataset.address, ago(seen)].filter(Boolean).join(" · ");
+  }
+}
+
+// Datapoints the XML declares. Those already polled appear in the grid above;
+// the rest are listed here so the appliance's full surface is visible, with a
+// button to read one on demand.
+function renderXmlDatapoints(points) {
+  const body = $("xmlpoints");
+  body.innerHTML = "";
+  const unpolled = (points || []).filter((p) => !p.polled);
+  $("xml-count").textContent = unpolled.length + " not polled";
+
+  for (const p of unpolled) {
+    const tr = document.createElement("tr");
+    for (const text of [p.address, p.name || "", p.size, p.unit]) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (text === p.address) td.className = "mono";
+      tr.appendChild(td);
+    }
+
+    const cell = document.createElement("td");
+    const button = document.createElement("button");
+    button.className = "read";
+    button.textContent = "Read";
+    const output = document.createElement("span");
+    output.className = "result";
+
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      output.textContent = " reading…";
+      try {
+        // One read, on request. These are the datapoints not worth polling --
+        // a schedule that changes twice a year, a usually empty fault history.
+        const result = await getJSON("/api/read/" + p.address);
+        output.textContent = result.success
+          ? " " + result.value + (result.raw ? "  [" + result.raw + "]" : "")
+          : " failed: " + (result.error || "no reading");
+        output.className = "result" + (result.success ? "" : " bad");
+      } catch (err) {
+        output.textContent = " " + err.message;
+        output.className = "result bad";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    cell.append(button, output);
+    tr.appendChild(cell);
+    body.appendChild(tr);
+  }
+}
+
 async function refresh() {
   // Each panel is refreshed independently: one failing endpoint should not
   // blank the whole page.
@@ -438,6 +518,7 @@ async function refresh() {
     getJSON("/api/mqtt/status").then((status) => { renderMqtt(status); renderMqttInfo(status); }),
     getJSON("/api/datapoints").then(renderDataPoints),
     getJSON("/api/mqtt/hooks").then(renderHooks),
+    getJSON("/api/xml/datapoints").then(renderXmlDatapoints),
   ];
   const results = await Promise.allSettled(tasks);
   const failure = results.find((r) => r.status === "rejected");
@@ -446,6 +527,7 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, 10000);
+setInterval(tickAges, 1000);
 </script>
 </body>
 </html>

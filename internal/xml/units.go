@@ -107,6 +107,25 @@ func (uc *UnitConverter) ConvertEnumValue(rawBytes []byte, unitName string) (str
 		return "", fmt.Errorf("unit %s is not an enum type", unitName)
 	}
 
+	return uc.lookupEnum(unit, rawBytes), nil
+}
+
+// LookupEnumText resolves bytes against a unit's enum table without requiring
+// the unit to be declared as an enum.
+//
+// The ES unit is declared "errstate" yet carries an enum for its fault code,
+// which is how the reference implementation reads it too.
+func (uc *UnitConverter) LookupEnumText(rawBytes []byte, unitName string) (string, bool) {
+	unit, exists := uc.GetUnitByName(unitName)
+	if !exists || len(unit.Enums) == 0 {
+		return "", false
+	}
+	text := uc.lookupEnum(unit, rawBytes)
+	return text, text != ""
+}
+
+// lookupEnum matches bytes against a unit's enum entries.
+func (uc *UnitConverter) lookupEnum(unit Unit, rawBytes []byte) string {
 	// Convert bytes to hex string for comparison
 	hexString := ""
 	for _, b := range rawBytes {
@@ -124,19 +143,19 @@ func (uc *UnitConverter) ConvertEnumValue(rawBytes []byte, unitName string) (str
 
 		// Compare hex strings (case insensitive)
 		if strings.EqualFold(enumEntry.Bytes, hexString) {
-			return enumEntry.Text, nil
+			return enumEntry.Text
 		}
 	}
 
 	// No match found, look for UNKNOWN default
 	for _, enumEntry := range unit.Enums {
 		if enumEntry.Bytes == "" && (enumEntry.Text == "UNKNOWN" || enumEntry.Text == "NOT OK") {
-			return fmt.Sprintf("%s (0x%s)", enumEntry.Text, hexString), nil
+			return fmt.Sprintf("%s (0x%s)", enumEntry.Text, hexString)
 		}
 	}
 
 	// No default found, return hex value
-	return fmt.Sprintf("UNKNOWN (0x%s)", hexString), nil
+	return fmt.Sprintf("UNKNOWN (0x%s)", hexString)
 }
 
 // evaluateCalc evaluates a simple calculation expression like "V/10" or "V*2"
