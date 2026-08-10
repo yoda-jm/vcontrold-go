@@ -88,6 +88,17 @@ th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--lin
 th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
 td.num, th.num { text-align: right; font-family: var(--mono); }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.drawer { margin-bottom: 10px; }
+.drawer summary {
+  cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: 13.5px;
+  list-style: none; user-select: none;
+}
+.drawer summary::-webkit-details-marker { display: none; }
+.drawer summary::before { content: "\25B8 "; color: var(--muted); }
+.drawer[open] summary::before { content: "\25BE "; }
+.drawer[open] summary { border-bottom: 1px solid var(--line); }
+td.key { color: var(--muted); width: 40%; }
+td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 
 footer { color: var(--muted); font-size: 12.5px; padding: 0 20px 28px; max-width: 1400px; margin: 0 auto; }
 a { color: var(--accent); }
@@ -125,6 +136,36 @@ code { font-family: var(--mono); font-size: 12.5px; }
         <tbody id="groups"></tbody>
       </table>
     </div>
+  </section>
+
+  <section>
+    <h2>Configuration</h2>
+
+    <details class="panel drawer">
+      <summary>Data points</summary>
+      <table>
+        <thead><tr><th>Address</th><th>Name</th><th class="num">Bytes</th><th>Type</th><th>Unit</th><th>XML</th></tr></thead>
+        <tbody id="datapoints"></tbody>
+      </table>
+    </details>
+
+    <details class="panel drawer">
+      <summary>MQTT</summary>
+      <table><tbody id="mqttinfo"></tbody></table>
+    </details>
+
+    <details class="panel drawer">
+      <summary>Write hooks</summary>
+      <table>
+        <thead><tr><th>Topic</th><th>Address</th><th>Range</th><th>State</th></tr></thead>
+        <tbody id="hooks"></tbody>
+      </table>
+    </details>
+
+    <details class="panel drawer">
+      <summary>Daemon</summary>
+      <table><tbody id="daemon"></tbody></table>
+    </details>
   </section>
 
   <section id="problems-section" hidden>
@@ -200,7 +241,12 @@ function renderDevice(device) {
 }
 
 function renderReadings(payload) {
-  const readings = payload.readings || [];
+  // Sorted by address: /api/cached is backed by a Go map, whose iteration
+  // order is randomised by design, so an unsorted grid reshuffles itself on
+  // every poll and cannot be read.
+  const readings = (payload.readings || [])
+    .slice()
+    .sort((a, b) => (a.address ?? 0) - (b.address ?? 0));
   const container = $("readings");
   const problems = [];
   container.innerHTML = "";
@@ -312,14 +358,86 @@ function renderMqtt(status) {
           status.connected ? "ok" : "bad");
 }
 
+function row(body, cells, opts = {}) {
+  const tr = document.createElement("tr");
+  cells.forEach((text, index) => {
+    const td = document.createElement("td");
+    if (opts.keyFirst && index === 0) td.className = "key";
+    if (opts.mono && opts.mono.includes(index)) td.className += " mono";
+    if (opts.num && opts.num.includes(index)) td.className += " num";
+    td.textContent = text === undefined || text === null ? "" : String(text);
+    tr.appendChild(td);
+  });
+  body.appendChild(tr);
+}
+
+function hex(address) {
+  return "0x" + Number(address).toString(16).toUpperCase().padStart(4, "0");
+}
+
+function renderDataPoints(points) {
+  const body = $("datapoints");
+  body.innerHTML = "";
+  for (const p of (points || []).slice().sort((a, b) => a.address - b.address)) {
+    row(body, [hex(p.address), p.name, p.size, p.dataType,
+               p.vitoUnit || p.unitType || "", p.inXML ? "yes" : "no"],
+        { mono: [0], num: [2] });
+  }
+}
+
+function renderMqttInfo(status) {
+  const body = $("mqttinfo");
+  body.innerHTML = "";
+  if (!status) return;
+  row(body, ["Broker", status.broker || ""], { keyFirst: true });
+  row(body, ["Connected", status.connected ? "yes" : "no"], { keyFirst: true });
+  row(body, ["Addresses monitored", status.monitoredCount], { keyFirst: true });
+  row(body, ["Values published", status.publishedCount], { keyFirst: true });
+  row(body, ["Republish threshold", status.refreshThreshold || ""], { keyFirst: true });
+}
+
+function renderHooks(hooks) {
+  const body = $("hooks");
+  body.innerHTML = "";
+  for (const h of hooks || []) {
+    const action = h.action || {};
+    const range = action.min_value !== undefined && action.max_value !== undefined
+      ? action.min_value + " to " + action.max_value
+      : "";
+    row(body, [h.topic, action.address || "", range, h.enabled ? "enabled" : "disabled"],
+        { mono: [0, 1] });
+  }
+}
+
+function renderDaemon(config, device) {
+  const body = $("daemon");
+  body.innerHTML = "";
+  const yaml = config || {};
+  row(body, ["Serial device", device?.device || yaml.device || ""], { keyFirst: true });
+  row(body, ["Controller profile", device?.profile || ""], { keyFirst: true });
+  row(body, ["vito.xml", yaml.vito_xml || ""], { keyFirst: true });
+  row(body, ["Address overrides", yaml.vito_overrides_xml || "none"], { keyFirst: true });
+  row(body, ["Topic root", yaml.mqtt?.topic_root || ""], { keyFirst: true });
+  // The credential is never rendered: this page has no authentication and is
+  // reachable from the whole network.
+  row(body, ["MQTT user", yaml.mqtt?.username ? yaml.mqtt.username + " (password hidden)" : ""],
+      { keyFirst: true });
+  row(body, ["Web port", yaml.web_port || ""], { keyFirst: true });
+}
+
 async function refresh() {
   // Each panel is refreshed independently: one failing endpoint should not
   // blank the whole page.
   const tasks = [
-    getJSON("/api/device").then(renderDevice),
+    getJSON("/api/device").then((device) => {
+      renderDevice(device);
+      return getJSON("/api/config/yaml").then((config) => renderDaemon(config, device));
+    }),
     getJSON("/api/cached").then(renderReadings),
     getJSON("/api/multi-refresh/status").then(renderGroups),
-    getJSON("/api/mqtt/status").then(renderMqtt),
+    getJSON("/api/mqtt/status").then((status) => { renderMqtt(status); renderMqttInfo(status); }),
+    getJSON("/api/datapoints").then(renderDataPoints),
+    getJSON("/api/mqtt/hooks").then(renderHooks),
   ];
   const results = await Promise.allSettled(tasks);
   const failure = results.find((r) => r.status === "rejected");

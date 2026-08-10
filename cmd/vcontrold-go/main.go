@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/yoda-jm/vcontrold-go/internal/config"
 	"github.com/yoda-jm/vcontrold-go/internal/errors"
@@ -345,6 +347,20 @@ func runApplication(reader *viessmann.Reader, cfg *config.Config, probe singleRe
 	if cfg.WebMode {
 		// Start web server
 		server := web.NewServer(reader, cfg)
+
+		// Announce the daemon as offline before dying, so Home Assistant marks
+		// its entities unavailable rather than keeping the last retained values
+		// and presenting them as live.
+		stopping := make(chan os.Signal, 1)
+		signal.Notify(stopping, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			sig := <-stopping
+			logging.Info("Received %s, shutting down", sig)
+			server.Shutdown()
+			reader.Close()
+			os.Exit(0)
+		}()
+
 		fmt.Printf("Starting web server on port %s...\n", cfg.WebPort)
 		return server.Start()
 	} else {

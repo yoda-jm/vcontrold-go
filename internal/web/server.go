@@ -110,6 +110,17 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 	return s
 }
 
+// Shutdown releases what the server owns, in the order that matters: the
+// availability announcement has to reach the broker before the connection goes.
+func (s *Server) Shutdown() {
+	if s.mqttPublisher != nil {
+		s.mqttPublisher.Shutdown()
+	}
+	if s.hookManager != nil {
+		s.hookManager.Disconnect()
+	}
+}
+
 // Start starts the web server
 func (s *Server) Start() error {
 	r := mux.NewRouter()

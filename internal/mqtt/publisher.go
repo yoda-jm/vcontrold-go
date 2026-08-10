@@ -432,3 +432,34 @@ func (p *Publisher) PublishRawMirrorDiscovery() error {
 
 	return nil
 }
+
+// Shutdown announces the daemon as offline and closes the connection.
+//
+// The broker's last will covers an abrupt death, but a clean DISCONNECT
+// suppresses it: the broker assumes the client meant to leave and publishes
+// nothing. Home Assistant would then keep the last retained values and present
+// them as live, indefinitely.
+//
+// Today the daemon is killed by SIGTERM without disconnecting, so the will
+// fires and the behaviour happens to be right. Announcing it explicitly makes
+// that a decision rather than a side effect of not shutting down cleanly.
+func (p *Publisher) Shutdown() {
+	if p.runtime != nil {
+		if err := p.runtime.save(); err != nil {
+			logging.Warn("Could not persist the run-time counters on shutdown: %v", err)
+		}
+	}
+
+	if p.client == nil || !p.client.IsConnected() {
+		return
+	}
+
+	token := p.client.Publish(p.availabilityTopic(), 0, true, availabilityOffline)
+	if !token.WaitTimeout(2*time.Second) || token.Error() != nil {
+		logging.Warn("Could not announce the daemon as offline: %v", token.Error())
+	} else {
+		logging.Info("Announced offline on %s", p.availabilityTopic())
+	}
+
+	p.client.Disconnect(250)
+}
