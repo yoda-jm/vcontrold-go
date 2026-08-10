@@ -61,12 +61,29 @@ refresh_groups:
       - "0x2308"   # party setpoint
 
   # Schedules and fault history. Both change on the scale of months, so they
-  # are read four times a day rather than every minute -- 17 addresses at about
+  # are read four times a day rather than every minute -- 31 addresses at about
   # two seconds each is a minute of link time per cycle.
+  #
+  # The three schedules are read Monday first, in the order the appliance stores
+  # them; mqtt_schedules below gathers each set of seven into one entity.
   - name: Schedules and faults
     interval: 6h
     enabled: true
     addresses:
+      - "0x2000"   # heating circuit M1 schedule, Monday
+      - "0x2008"   # Tuesday
+      - "0x2010"   # Wednesday
+      - "0x2018"   # Thursday
+      - "0x2020"   # Friday
+      - "0x2028"   # Saturday
+      - "0x2030"   # Sunday
+      - "0x2100"   # hot-water schedule, Monday
+      - "0x2108"   # Tuesday
+      - "0x2110"   # Wednesday
+      - "0x2118"   # Thursday
+      - "0x2120"   # Friday
+      - "0x2128"   # Saturday
+      - "0x2130"   # Sunday
       - "0x2200"   # recirculation schedule, Monday
       - "0x2208"   # Tuesday
       - "0x2210"   # Wednesday
@@ -243,50 +260,11 @@ mqtt:
       icon: mdi:party-popper
 
     # --- Recirculation schedule ----------------------------------------------
-    # The loop is programmed 05:30-22:00, seven days a week: 16.5 h a day, not
-    # the 24 h that was assumed. The schedule is what would be narrowed to cut
-    # the standing loss, so it is worth watching for changes.
-    #
-    # No state_class: these are text. The historisable number is the measured
-    # run time already published as pumpZirkuHours, which is worth more than the
-    # programmed hours anyway.
-    - address: "0x2200"
-      alias: timerZirkuLu
-      friendly_name: Bouclage lundi
-      icon: mdi:calendar-clock
-    - address: "0x2208"
-      alias: timerZirkuMa
-      friendly_name: Bouclage mardi
-      icon: mdi:calendar-clock
-    - address: "0x2210"
-      alias: timerZirkuMe
-      friendly_name: Bouclage mercredi
-      icon: mdi:calendar-clock
-    - address: "0x2218"
-      alias: timerZirkuJe
-      friendly_name: Bouclage jeudi
-      icon: mdi:calendar-clock
-    - address: "0x2220"
-      alias: timerZirkuVe
-      friendly_name: Bouclage vendredi
-      icon: mdi:calendar-clock
-    - address: "0x2228"
-      alias: timerZirkuSa
-      friendly_name: Bouclage samedi
-      icon: mdi:calendar-clock
-    - address: "0x2230"
-      alias: timerZirkuDi
-      friendly_name: Bouclage dimanche
-      icon: mdi:calendar-clock
-
     # --- Fault history -------------------------------------------------------
     # Ten slots, most recent first. Empty slots report "(empty)" rather than a
     # fault dated year zero. The three that are filled all hold a burner fault
     # from June 2021, well before this installation was taken over.
     #
-    # The schedules for hot water (0x2100) and the heating circuit (0x2000) are
-    # not published: they are readable on demand from the daemon's own page, and
-    # entities that never change are clutter.
     - address: "0x7507"
       alias: getError0
       friendly_name: Défaut 1 (le plus récent)
@@ -446,6 +424,36 @@ mqtt_derived:
 #
 # These names are final. Renaming an entity orphans its statistics and starts a
 # new empty series, so the naming has to be settled before history accumulates.
+# --- Weekly schedules --------------------------------------------------------
+#
+# A circuit's programme is seven addresses, one per weekday, and on this
+# installation all seven carry the same period. Publishing them separately puts
+# seven identical values in front of someone who wants to know one thing: when
+# the circuit is allowed to run. Each entity below collapses its week, so a
+# uniform programme reads as "05:30-22:00" and a week where the weekend differs
+# still says so.
+#
+# Text, so no state_class. The historisable numbers are the measured run times
+# published under mqtt_runtime, which are worth more than the programmed hours.
+mqtt_schedules:
+  # The loop is programmed 05:30-22:00 daily: 16.5 h a day, not the 24 h that
+  # was assumed. This schedule is what would be narrowed to cut the standing
+  # loss, so it is worth watching for changes.
+  - alias: scheduleZirku
+    friendly_name: Programme bouclage
+    icon: mdi:calendar-clock
+    addresses: ["0x2200", "0x2208", "0x2210", "0x2218", "0x2220", "0x2228", "0x2230"]
+
+  - alias: scheduleWW
+    friendly_name: Programme eau chaude
+    icon: mdi:calendar-clock
+    addresses: ["0x2100", "0x2108", "0x2110", "0x2118", "0x2120", "0x2128", "0x2130"]
+
+  - alias: scheduleM1
+    friendly_name: Programme chauffage
+    icon: mdi:calendar-clock
+    addresses: ["0x2000", "0x2008", "0x2010", "0x2018", "0x2020", "0x2028", "0x2030"]
+
 mqtt_runtime:
   # The highest-value measurement in this configuration. The recirculation pump
   # reads 1 in August with no space heating; a loop running around the clock

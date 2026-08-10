@@ -70,9 +70,26 @@ type YamlConfig struct {
 	// Cumulative run-time counters built from on/off datapoints.
 	Runtimes []MQTTRuntimeConfig `yaml:"mqtt_runtime" json:"mqtt_runtime"`
 
+	// Weekly schedules, published as one entity per circuit.
+	Schedules []MQTTScheduleConfig `yaml:"mqtt_schedules" json:"mqtt_schedules"`
+
 	// Where the run-time totals are persisted. Empty places the file beside
 	// the configuration.
 	RuntimeStateFile string `yaml:"runtime_state_file,omitempty" json:"runtime_state_file,omitempty"`
+}
+
+// MQTTScheduleConfig gathers a circuit's seven daily programmes into one entity.
+//
+// The appliance stores a schedule as seven addresses, one per weekday. Publishing
+// them separately puts seven usually identical values in front of someone who
+// wants to know one thing: when the circuit is allowed to run.
+type MQTTScheduleConfig struct {
+	Alias        string `yaml:"alias" json:"alias"`
+	FriendlyName string `yaml:"friendly_name" json:"friendly_name"`
+	Icon         string `yaml:"icon,omitempty" json:"icon,omitempty"`
+
+	// Addresses, Monday first, in the order the appliance stores them.
+	Addresses []string `yaml:"addresses" json:"addresses"`
 }
 
 // MQTTRuntimeConfig turns an on/off datapoint into a cumulative run-time

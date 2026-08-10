@@ -81,6 +81,9 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 		if err := s.mqttPublisher.PublishRuntimeDiscovery(cfg.YamlConfig.Runtimes, statePath); err != nil {
 			logging.Warn("MQTT run-time discovery not published: %v", err)
 		}
+		if err := s.mqttPublisher.PublishScheduleDiscovery(cfg.YamlConfig.Schedules); err != nil {
+			logging.Warn("MQTT schedule discovery not published: %v", err)
+		}
 	}
 
 	// Initialize MQTT hook manager

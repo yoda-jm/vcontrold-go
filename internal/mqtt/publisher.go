@@ -41,6 +41,11 @@ type Publisher struct {
 	runtime        *runtimeTracker
 	runtimeConfigs []config.MQTTRuntimeConfig
 
+	// Weekly schedules, gathered per circuit.
+	schedules       *scheduleState
+	scheduleConfigs []config.MQTTScheduleConfig
+	scheduleIndex   map[uint16]scheduleSlot
+
 	// Refuses counter readings that cannot be true.
 	guard *counterGuard
 
@@ -134,17 +139,21 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 		return
 	}
 
+	// Only publish if successful reading
+	if !event.Reading.Success {
+		return
+	}
+
+	// Schedule days are read but not published individually, so they never
+	// reach the alias lookup below. Feed the aggregator first.
+	p.handleSchedule(event.Address, p.cleanValueForHomeAssistant(event.Reading.FormattedValue))
+
 	p.mutex.RLock()
 	alias, exists := p.addressMap[event.Address]
 	p.mutex.RUnlock()
 
 	if !exists {
 		// Address not monitored for MQTT
-		return
-	}
-
-	// Only publish if successful reading
-	if !event.Reading.Success {
 		return
 	}
 

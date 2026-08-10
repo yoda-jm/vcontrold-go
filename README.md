@@ -65,6 +65,9 @@ not carry.
 - **MQTT with Home Assistant discovery** — retained, so entities survive a
   restart, and carrying the `state_class` that keeps history alive.
 - **Climate entities** for the setpoints the controller actually exposes.
+- **Weekly schedules and fault history**, decoding the two composite unit types
+  (`cycletime`, `errstate`) that are packed structures rather than scaled
+  numbers.
 - **Machine-specific overrides** applied on top of the community XML, never
   modifying it, so `make deps` stays safe.
 - **Availability topic** with a last will, so a dead daemon shows as unavailable
@@ -186,6 +189,31 @@ topic read openv/#
 > is denied everything, and in MQTT 3.1.1 the PUBACK is indistinguishable from
 > success. Use `mosquitto_pub -V 5` to see the real reason code: `135` is Not
 > authorized, `16` is accepted with no subscriber.
+
+### Weekly schedules
+
+A circuit's programme lives at seven addresses, one per weekday. Publishing them
+separately puts seven usually identical values in front of someone who wants to
+know one thing: when the circuit is allowed to run. `mqtt_schedules` gathers a
+set of seven into one entity and collapses the week, so a uniform programme
+reads as `05:30-22:00` while a week whose weekend differs still says so:
+
+```yaml
+mqtt_schedules:
+  - alias: scheduleZirku
+    friendly_name: Recirculation programme
+    icon: mdi:calendar-clock
+    # Monday first, in the order the appliance stores them.
+    addresses: ["0x2200", "0x2208", "0x2210", "0x2218", "0x2220", "0x2228", "0x2230"]
+```
+
+The seven addresses still have to appear in a refresh group. A schedule changes
+on the scale of months, so a six-hourly group is enough, and the entity is only
+republished when the summary actually changes.
+
+These are text, so they carry no `state_class`. The historisable number is the
+measured run time from `mqtt_runtime`, which is worth more than the programmed
+hours anyway.
 
 A ready-made dashboard view is in
 [`config/home_assistant_vitola.yaml`](config/home_assistant_vitola.yaml).
