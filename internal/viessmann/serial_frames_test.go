@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"go.bug.st/serial"
+
+	"github.com/yoda-jm/vcontrold-go/internal/protocol"
 )
 
 // fakePort is an in-memory serial port: it records what is written and replays
@@ -153,7 +155,11 @@ func TestReadNBytes_TimesOutInsteadOfSpinning(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a timeout error from a silent port")
 		}
-	case <-time.After(5 * time.Second):
+	// The guard has to be comfortably longer than the deadline being tested.
+	// Set to the deadline itself, the two race, and a loaded CI runner under
+	// -race loses that race: the test reported an infinite loop when readNBytes
+	// had in fact returned at 5.00 s.
+	case <-time.After(2 * protocol.KW2_READ_DEADLINE_MS * time.Millisecond):
 		t.Fatal("readNBytes did not terminate: the infinite loop is back")
 	}
 
