@@ -5,6 +5,11 @@ export
 
 TARGET_HOST ?= user@boiler-host.local
 TARGET_DIR  ?= /opt/vcontrold-go
+# Architecture of the target, not of this machine. Named TARGET_* rather than
+# GOARCH because .env is exported, and a global GOARCH would break `go test`.
+# Raspberry Pi Zero W (ARMv6): TARGET_GOARCH=arm TARGET_GOARM=6
+TARGET_GOARCH ?= amd64
+TARGET_GOARM  ?=
 BIN         := vcontrold-go
 PKG         := ./cmd/vcontrold-go
 
@@ -19,7 +24,7 @@ GO_PKGS := ./cmd/... ./internal/...
 
 help:
 	@echo "deps         fetch the community XML into third_party/"
-	@echo "build        build the binary for the Linux amd64 target"
+	@echo "build        build the binary for the target (TARGET_GOARCH, default amd64)"
 	@echo "test         run the unit tests"
 	@echo "test-race    run the tests under the race detector"
 	@echo "cover        report test coverage per package"
@@ -39,7 +44,7 @@ tools:
 	go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 
 build:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o $(BIN) $(PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(TARGET_GOARCH) GOARM=$(TARGET_GOARM) go build -trimpath -o $(BIN) $(PKG)
 	@ls -lh $(BIN)
 
 test:

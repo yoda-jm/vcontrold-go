@@ -15,7 +15,7 @@ Two machines, and that shapes everything:
 **Never build on the target.** Build here, ship, run there:
 
 ```bash
-make build        # cross-compile for linux/amd64
+make build        # cross-compile for the target (TARGET_GOARCH in .env)
 make deploy       # rsync binary + config + overrides
 make run-remote   # run on the target
 make probe        # check the adapter is detected
