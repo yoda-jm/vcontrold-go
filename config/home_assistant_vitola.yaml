@@ -39,7 +39,7 @@ views:
     show_name: false
     show_state: true
     show_icon: true
-    entity: sensor.vitola_200_mode_de_fonctionnement
+    entity: sensor.vitola_200_mode_de_fonctionnement_m2
   - type: entity
     show_name: false
     show_state: true
@@ -85,9 +85,6 @@ views:
       entity: sensor.vitola_200_temperature_de_depart
       name: Départ
     - type: tile
-      entity: sensor.vitola_200_temperature_de_retour
-      name: Retour
-    - type: tile
       entity: sensor.vitola_200_temperature_exterieure
       name: Extérieure
       color: cyan
@@ -101,8 +98,6 @@ views:
         name: Eau chaude
       - entity: sensor.vitola_200_temperature_de_depart
         name: Départ
-      - entity: sensor.vitola_200_temperature_de_retour
-        name: Retour
       - entity: sensor.vitola_200_temperature_exterieure
         name: Extérieure
   - type: grid
@@ -116,8 +111,8 @@ views:
       name: Brûleur
       color: red
     - type: tile
-      entity: binary_sensor.vitola_200_circulateur_m1
-      name: Circulateur M1
+      entity: binary_sensor.vitola_200_circulateur_m2
+      name: Circulateur M2
       color: blue
     - type: tile
       entity: binary_sensor.vitola_200_pompe_de_charge_ballon
@@ -137,7 +132,7 @@ views:
       entities:
       - entity: binary_sensor.vitola_200_bruleur
         name: Brûleur
-      - entity: binary_sensor.vitola_200_circulateur_m1
+      - entity: binary_sensor.vitola_200_circulateur_m2
         name: Circulateur
       - entity: binary_sensor.vitola_200_pompe_de_charge_ballon
         name: Charge ballon
@@ -177,8 +172,34 @@ views:
         name: Brûleur
       - entity: sensor.vitola_200_heures_pompe_de_bouclage
         name: Bouclage
-      - entity: sensor.vitola_200_heures_circulateur_m1
+      - entity: sensor.vitola_200_heures_circulateur_m2
         name: Circulateur
+  - type: grid
+    cards:
+    - type: heading
+      heading: Programmes
+      heading_style: title
+      icon: mdi:calendar-clock
+    - type: tile
+      entity: sensor.vitola_200_programme_chauffage_m2
+      name: Chauffage
+      hide_state: false
+    - type: tile
+      entity: sensor.vitola_200_programme_eau_chaude
+      name: Eau chaude
+    - type: tile
+      entity: sensor.vitola_200_programme_bouclage
+      name: Bouclage ECS
+    - type: entities
+      title: Derniers défauts
+      show_header_toggle: false
+      entities:
+      - entity: sensor.vitola_200_defaut_1_le_plus_recent
+        name: '1'
+      - entity: sensor.vitola_200_defaut_2
+        name: '2'
+      - entity: sensor.vitola_200_defaut_3
+        name: '3'
   - type: grid
     cards:
     - type: heading
@@ -186,22 +207,22 @@ views:
       heading_style: title
       icon: mdi:tune
     - type: tile
-      entity: sensor.vitola_200_mode_de_fonctionnement
+      entity: sensor.vitola_200_mode_de_fonctionnement_m2
       name: Mode
     - type: tile
       entity: sensor.vitola_200_consigne_chaudiere
       name: Consigne chaudière
     - type: tile
-      entity: sensor.vitola_200_pente_de_la_courbe_de_chauffe
+      entity: sensor.vitola_200_pente_de_la_courbe_de_chauffe_m2
       name: Pente
     - type: tile
-      entity: sensor.vitola_200_niveau_de_la_courbe_de_chauffe
+      entity: sensor.vitola_200_niveau_de_la_courbe_de_chauffe_m2
       name: Niveau
     - type: tile
-      entity: sensor.vitola_200_consigne_ambiance_normale
+      entity: sensor.vitola_200_consigne_ambiance_normale_m2
       name: Ambiance normale
     - type: tile
-      entity: sensor.vitola_200_consigne_ambiance_reduite
+      entity: sensor.vitola_200_consigne_ambiance_reduite_m2
       name: Ambiance réduite
   - type: grid
     cards:

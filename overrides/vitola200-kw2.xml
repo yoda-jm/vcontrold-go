@@ -47,6 +47,12 @@
       Inferred rather than confirmed: nothing here proves 080A is the return
       sensor rather than another probe that happens to answer. It is published
       as such because the 300 profile says so and the reading is consistent.
+
+      Refuted on 2026-10-18: 080A answered 20.0 C and nothing else from
+      2026-10-12 to 2026-10-18, through dozens of burner cycles and the first
+      heating day, while the flow (080C) swung between 21 and 53 C. No probe is
+      behind it. The address stays declared so it can still be read on demand,
+      but it is no longer polled or published.
     -->
     <command name="getTempRL17A" protocmd="getaddr">
       <addr>080A</addr>

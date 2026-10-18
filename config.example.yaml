@@ -24,6 +24,12 @@ web_port: "8080"
 verbose: false
 
 refresh_groups:
+  # The heating runs through circuit M2, the mixed circuit: every 0x3xxx
+  # address below. A1/M1 (0x2xxx) is not connected on this installation. Its
+  # pump totalled 0.18 h over the boiler's life, and on 2026-10-18, when the
+  # heating was started at the panel, 0x2301 stayed on WW while 0x3301 read
+  # H+WW. Until that date this file polled M1, the idle circuit.
+  #
   # What moves: states and temperatures.
   - name: Temperatures and states
     interval: 60s
@@ -34,12 +40,11 @@ refresh_groups:
       - "0x0804"   # hot water temperature
       - "0x080C"   # flow temperature (the only flow probe present)
       - "0x5502"   # boiler setpoint
-      - "0x080A"   # return temperature
       - "0x551E"   # burner state
-      - "0x2906"   # circulator M1 state
+      - "0x3906"   # circulator M2 state
       - "0x0845"   # cylinder charge pump
       - "0x0846"   # circulation pump
-      - "0x2301"   # operating mode
+      - "0x3301"   # operating mode M2
       - "0x7579"   # collective fault
 
   # What barely moves: counters and setpoints. Polling them often gains
@@ -52,13 +57,13 @@ refresh_groups:
       - "0x088A"   # burner starts
       - "0x08AB"   # burner hours, stage 2
       - "0x6300"   # hot water setpoint
-      - "0x2306"   # normal room setpoint M1
-      - "0x2307"   # reduced room setpoint M1
-      - "0x2304"   # heating curve level
-      - "0x2305"   # heating curve slope
-      - "0x2302"   # eco mode
-      - "0x2303"   # party mode
-      - "0x2308"   # party setpoint
+      - "0x3306"   # normal room setpoint M2
+      - "0x3307"   # reduced room setpoint M2
+      - "0x3304"   # heating curve level M2
+      - "0x3305"   # heating curve slope M2
+      - "0x3302"   # eco mode M2
+      - "0x3303"   # party mode M2
+      - "0x3308"   # party setpoint M2
 
   # Schedules and fault history. Both change on the scale of months, so they
   # are read four times a day rather than every minute -- 31 addresses at about
@@ -70,13 +75,13 @@ refresh_groups:
     interval: 6h
     enabled: true
     addresses:
-      - "0x2000"   # heating circuit M1 schedule, Monday
-      - "0x2008"   # Tuesday
-      - "0x2010"   # Wednesday
-      - "0x2018"   # Thursday
-      - "0x2020"   # Friday
-      - "0x2028"   # Saturday
-      - "0x2030"   # Sunday
+      - "0x3000"   # heating circuit M2 schedule, Monday
+      - "0x3008"   # Tuesday
+      - "0x3010"   # Wednesday
+      - "0x3018"   # Thursday
+      - "0x3020"   # Friday
+      - "0x3028"   # Saturday
+      - "0x3030"   # Sunday
       - "0x2100"   # hot-water schedule, Monday
       - "0x2108"   # Tuesday
       - "0x2110"   # Wednesday
@@ -168,9 +173,12 @@ mqtt:
       component: binary_sensor
       device_class: running
       icon: mdi:fire
-    - address: "0x2906"
-      alias: getPumpeStatusM1
-      friendly_name: Circulateur M1
+    # Every heating-circuit entity carries "M2" in its name. The M1 entities
+    # published before 2026-10-18 described the idle circuit; giving these new
+    # names keeps their statistics from being spliced onto that history.
+    - address: "0x3906"
+      alias: getPumpeStatusM2
+      friendly_name: Circulateur M2
       component: binary_sensor
       device_class: running
     # A text sensor has no memory in Home Assistant beyond purge_keep_days.
@@ -178,57 +186,54 @@ mqtt:
     # against — when the heating season actually started and stopped — so it
     # also has to exist as a number. raw_alias publishes the protocol byte
     # itself, straight from vcontrold.xml, rather than an invented mapping.
-    - address: "0x2301"
-      alias: getBetriebArtM1
-      friendly_name: Mode de fonctionnement
+    - address: "0x3301"
+      alias: getBetriebArtM2
+      friendly_name: Mode de fonctionnement M2
       device_class: enum
       options: ["WW", "RED", "NORM", "H+WW", "ABSCHALT"]
-      raw_alias: getBetriebArtM1_code
-      raw_friendly_name: Mode de fonctionnement (code)
+      raw_alias: getBetriebArtM2_code
+      raw_friendly_name: Mode de fonctionnement M2 (code)
 
     # --- Additions -----------------------------------------------------------
+    # getTempVListM2 in vito.xml: the flow of circuit M2, after the mixer. The
+    # alias predates that finding and is kept so the history stays one series.
     - address: "0x080C"
       alias: getTempVList
       friendly_name: Température de départ
     - address: "0x5502"
       alias: getTempKsoll
       friendly_name: Consigne chaudière
-    # Return temperature. The sensor is present on this installation: 0x080A
-    # reads a plausible value rather than a reserved one. Its address comes
-    # from the 300 profile, so it is declared in overrides/ rather than
-    # hardcoded. Needed for the delta-T across the circuit and to watch the
-    # condensation risk on a non-condensing cast-iron boiler.
-    - address: "0x080A"
-      alias: getTempRL
-      friendly_name: Température de retour
+    # No return temperature. 0x080A, taken from the 300 profile, answered
+    # 20.0 °C and nothing else through six days of burner cycles in October
+    # 2026, with the flow swinging between 21 and 53 °C: no probe is behind it.
     # Party-mode setpoint: a manual override here would otherwise be misread as
     # a change in the building's behaviour.
-    - address: "0x2308"
-      alias: getTempPartyM1
-      friendly_name: Consigne réception
+    - address: "0x3308"
+      alias: getTempPartyM2
+      friendly_name: Consigne réception M2
       unit: "°C"
       device_class: temperature
       state_class: measurement
-    - address: "0x2306"
-      alias: getTempRaumNorSollM1
-      friendly_name: Consigne ambiance normale
+    - address: "0x3306"
+      alias: getTempRaumNorSollM2
+      friendly_name: Consigne ambiance normale M2
       unit: "°C"
       device_class: temperature
       state_class: measurement
-    - address: "0x2307"
-      alias: getTempRaumRedSollM1
-      friendly_name: Consigne ambiance réduite
+    - address: "0x3307"
+      alias: getTempRaumRedSollM2
+      friendly_name: Consigne ambiance réduite M2
       unit: "°C"
       device_class: temperature
       state_class: measurement
-    - address: "0x2305"
-      alias: getNeigungM1
-      friendly_name: Pente de la courbe de chauffe
+    - address: "0x3305"
+      alias: getNeigungM2
+      friendly_name: Pente de la courbe de chauffe M2
       state_class: measurement
       icon: mdi:chart-line
-    - address: "0x2304"
-      alias: getNiveauM1
-      friendly_name: Niveau de la courbe de chauffe
+    - address: "0x3304"
+      alias: getNiveauM2
+      friendly_name: Niveau de la courbe de chauffe M2
       state_class: measurement
       icon: mdi:arrow-up-down
 
@@ -248,14 +253,14 @@ mqtt:
       friendly_name: Pompe de bouclage
       component: binary_sensor
       device_class: running
-    - address: "0x2302"
-      alias: getBetriebSparM1
-      friendly_name: Mode économie
+    - address: "0x3302"
+      alias: getBetriebSparM2
+      friendly_name: Mode économie M2
       component: binary_sensor
       icon: mdi:leaf
-    - address: "0x2303"
-      alias: getBetriebPartyM1
-      friendly_name: Mode réception
+    - address: "0x3303"
+      alias: getBetriebPartyM2
+      friendly_name: Mode réception M2
       component: binary_sensor
       icon: mdi:party-popper
 
@@ -321,25 +326,41 @@ mqtt_hooks:
       min_value: 35.0
       max_value: 60.0
 
-  # Normal room setpoint M1 (0x2306, 1 byte, unit ST). This is the setpoint
-  # the heating climate entity carries.
-  - topic: "openv/setTempRaumNorSollM1"
-    description: "Normal room setpoint M1 (0x2306, 1 byte, unit ST)"
+  # Normal room setpoint M2 (0x3306, 1 byte, unit ST). This is the setpoint
+  # the heating climate entity carries. vito.xml declares no setter for M2;
+  # the write length comes from getTempRaumNorSollM2 at the same address.
+  #
+  # Until 2026-10-18 this hook wrote 0x2306, the idle M1 circuit: the
+  # 2026-08-09 change from 22 to 20 °C never reached the heating.
+  - topic: "openv/setTempRaumNorSollM2"
+    description: "Normal room setpoint M2 (0x3306, 1 byte, unit ST)"
     enabled: true
     action:
       type: "write_address"
-      address: "0x2306"
+      address: "0x3306"
       min_value: 10.0
       max_value: 30.0
 
-  # setBetriebArtM1 is at 0x2301 per vito.xml — not 0x2323, which was
-  # configured until now and therefore never controlled anything.
-  - topic: "openv/setBetriebArtM1"
-    description: "Operating mode M1 (0x2301, 1 byte, unit BA)"
+  # Reduced room setpoint M2 (0x3307, 1 byte, unit ST). It read 3 °C on
+  # 2026-10-18 — the heating off from 22:00 to 06:00. The owner wants the
+  # night handled by the radiator valves rather than by the boiler, so it is
+  # set equal to the normal setpoint and the M2 schedule no longer cuts.
+  - topic: "openv/setTempRaumRedSollM2"
+    description: "Reduced room setpoint M2 (0x3307, 1 byte, unit ST)"
+    enabled: true
+    action:
+      type: "write_address"
+      address: "0x3307"
+      min_value: 3.0
+      max_value: 30.0
+
+  # Operating mode M2 (0x3301 per vito.xml, getBetriebArtM2).
+  - topic: "openv/setBetriebArtM2"
+    description: "Operating mode M2 (0x3301, 1 byte, unit BA)"
     enabled: false        # enable only after a verified round trip
     action:
       type: "write_address"
-      address: "0x2301"
+      address: "0x3301"
       min_value: 0
       max_value: 5
 
@@ -347,12 +368,12 @@ mqtt_hooks:
 # Climate entities exposed to Home Assistant.
 #
 # Two of them, because the controller holds two distinct setpoints: domestic
-# hot water (0x6300) and the heating circuit's room setpoint (0x2306). Merging
+# hot water (0x6300) and the heating circuit's room setpoint (0x3306). Merging
 # them into one entity would mean lying about one of the two.
 #
-# Their mode is read-only: the Vitotronic 200 KW2 has a single GLOBAL mode
-# (unit BA, address 0x2301) shared by both uses. Exposing it as a per-zone mode
-# would suggest separate control the appliance cannot deliver.
+# Their mode is read-only. It is not global: each circuit has its own mode
+# byte (0x2301 for A1/M1, 0x3301 for M2), and on 2026-10-18 they read WW and
+# H+WW at the same moment. Both entities follow M2, the only circuit connected.
 mqtt_climates:
 
   # The cylinder probe gives a genuine measured temperature, so this is a
@@ -373,7 +394,7 @@ mqtt_climates:
     #
     # Hot water is produced in every mode except the full stop.
     modes: ["off", "heat"]
-    mode_alias: getBetriebArtM1
+    mode_alias: getBetriebArtM2
     mode_template: "{{ 'off' if value == 'ABSCHALT' else 'heat' }}"
 
   # No current_alias: the controller exposes NO room sensor. Presenting the
@@ -383,8 +404,8 @@ mqtt_climates:
   - name: Chauffage
     object_id: vitola_chauffage
     icon: mdi:radiator
-    target_alias: getTempRaumNorSollM1  # -> command on openv/setTempRaumNorSollM1
-    target_address: "0x2306"
+    target_alias: getTempRaumNorSollM2  # -> command on openv/setTempRaumNorSollM2
+    target_address: "0x3306"
     action_alias: getBrennerStatus
     min_temp: 10
     max_temp: 30
@@ -392,7 +413,7 @@ mqtt_climates:
     # Heating only runs in the modes that call for it: in WW (hot water only,
     # the summer case) it is stopped, and the entity says so.
     modes: ["off", "heat"]
-    mode_alias: getBetriebArtM1
+    mode_alias: getBetriebArtM2
     mode_template: "{{ 'heat' if value in ['RED', 'NORM', 'H+WW'] else 'off' }}"
 
 # Computed values.
@@ -449,10 +470,10 @@ mqtt_schedules:
     icon: mdi:calendar-clock
     addresses: ["0x2100", "0x2108", "0x2110", "0x2118", "0x2120", "0x2128", "0x2130"]
 
-  - alias: scheduleM1
-    friendly_name: Programme chauffage
+  - alias: scheduleM2
+    friendly_name: Programme chauffage M2
     icon: mdi:calendar-clock
-    addresses: ["0x2000", "0x2008", "0x2010", "0x2018", "0x2020", "0x2028", "0x2030"]
+    addresses: ["0x3000", "0x3008", "0x3010", "0x3018", "0x3020", "0x3028", "0x3030"]
 
 mqtt_runtime:
   # The highest-value measurement in this configuration. The recirculation pump
@@ -466,9 +487,9 @@ mqtt_runtime:
     friendly_name: Heures pompe de bouclage
     icon: mdi:pump
 
-  - source_alias: getPumpeStatusM1
-    alias: pumpM1Hours
-    friendly_name: Heures circulateur M1
+  - source_alias: getPumpeStatusM2
+    alias: pumpM2Hours
+    friendly_name: Heures circulateur M2
     icon: mdi:pump
 
   - source_alias: getPumpeStatusSp
