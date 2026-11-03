@@ -61,5 +61,85 @@
       <description>Ermittle die Ruecklauftemperatur</description>
     </command>
 
+
+    <!--
+      Coding level 2 ("Codierung 2"), read on 2026-11-03.
+
+      The service manual (Vitotronic 200 KW2, 5851 700, 11/2007) groups the
+      codings by block, and each block mirrors its codings at 0x?7XX:
+        00 and general codings   0x77XX
+        boiler / burner 02..33   0x57XX
+        DHW 55..75               0x67XX
+        heating circuit A1       0x27XX (A0..FF)
+        heating circuit M2       0x37XX (A0..FF)
+      The general base alone (0x7702..0x7706, 0x7760) answered FF.
+
+      Confirmed against values known on this appliance:
+        37D3 = 0E, 37D4 = 00: M2 slope 1.4 and level 0, as at 0x3305 / 0x3304;
+        7700 = 04: system scheme 4, "M2 with DHW", which is this installation;
+        5705 = 08: boiler 8 K above the mixer circuit, factory value, and the
+             boiler setpoint does run 8 K above the M2 flow setpoint;
+        5706 = 55: maximum boiler water temperature 85 C, factory value;
+        6760 = 14: boiler 20 K above the DHW setpoint while the tank charges,
+             factory value, and the boiler setpoint reads 70 C for a 50 C tank.
+      With those five in agreement, the two others are read as:
+        5702 = 00: single-stage burner;
+        5704 = 00: burner switching hysteresis fixed at 4 K (04:0), which the
+             night of 2026-11-03 shows too: burner on at 52.4 C, off at 56.8 C,
+             for a 54.5 C setpoint.
+
+      Declared so they can be read on demand through /api/read; not polled,
+      never written. The manual sets codings at the panel, and no one is known
+      to have documented writing them over Optolink.
+    -->
+    <command name="getCod2Anlagenschema" protocmd="getaddr">
+      <addr>7700</addr>
+      <len>1</len>
+      <unit>ST</unit>
+      <description>Codierung 2, 00 Anlagenschema</description>
+    </command>
+    <command name="getCod2Brennertyp" protocmd="getaddr">
+      <addr>5702</addr>
+      <len>1</len>
+      <unit>ST</unit>
+      <description>Codierung 2, 02 Brennertyp (0 einstufig, 1 zweistufig, 2 modulierend)</description>
+    </command>
+    <command name="getCod2Schalthysterese" protocmd="getaddr">
+      <addr>5704</addr>
+      <len>1</len>
+      <unit>ST</unit>
+      <description>Codierung 2, 04 Schalthysterese Brenner (0 fest 4 K, 1 ERB50, 2 ERB80)</description>
+    </command>
+    <command name="getCod2Differenztemperatur" protocmd="getaddr">
+      <addr>5705</addr>
+      <len>1</len>
+      <unit>UTI</unit>
+      <description>Codierung 2, 05 Differenztemperatur Kessel ueber Mischerkreis</description>
+    </command>
+    <command name="getCod2KesselMax" protocmd="getaddr">
+      <addr>5706</addr>
+      <len>1</len>
+      <unit>UTI</unit>
+      <description>Codierung 2, 06 Maximalbegrenzung Kesselwassertemperatur</description>
+    </command>
+    <command name="getCod2UeberhoehungWW" protocmd="getaddr">
+      <addr>6760</addr>
+      <len>1</len>
+      <unit>UTI</unit>
+      <description>Codierung 2, 60 Kesselueberhoehung bei Speicherbeheizung</description>
+    </command>
+    <command name="getCod2NeigungM2" protocmd="getaddr">
+      <addr>37D3</addr>
+      <len>1</len>
+      <unit>UN</unit>
+      <description>Codierung 2, M2 D3 Neigung Heizkennlinie</description>
+    </command>
+    <command name="getCod2NiveauM2" protocmd="getaddr">
+      <addr>37D4</addr>
+      <len>1</len>
+      <unit>ST</unit>
+      <description>Codierung 2, M2 D4 Niveau Heizkennlinie</description>
+    </command>
+
   </commands>
 </vito>
