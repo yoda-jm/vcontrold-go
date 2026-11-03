@@ -88,9 +88,16 @@
              night of 2026-11-03 shows too: burner on at 52.4 C, off at 56.8 C,
              for a 54.5 C setpoint.
 
+      Viessmann's own datapoint list for the V200KW2 (the DP_Listen export
+      used by optolink-splitter) names the same addresses:
+      K00_KonfiAnlagenschemaV200_NR1 0x7700, K02_KonfiBrennertyp 0x5702,
+      K03_KonfiOelGasBetrieb 0x5703, K04_KonfiKesselSchalthysterese 0x5704,
+      K05_KonfiDTK 0x5705, K06_KonfiKTMax_NR1 0x5706,
+      K60_KonfiWW_KesselOffset 0x6760, K8B (KM burner control present) 0x778B.
+      It hides 04 when 8B reports a KM burner control.
+
       Declared so they can be read on demand through /api/read; not polled,
-      never written. The manual sets codings at the panel, and no one is known
-      to have documented writing them over Optolink.
+      never written. The manual sets codings at the panel.
     -->
     <command name="getCod2Anlagenschema" protocmd="getaddr">
       <addr>7700</addr>
@@ -103,6 +110,18 @@
       <len>1</len>
       <unit>ST</unit>
       <description>Codierung 2, 02 Brennertyp (0 einstufig, 1 zweistufig, 2 modulierend)</description>
+    </command>
+    <command name="getCod2OelGas" protocmd="getaddr">
+      <addr>5703</addr>
+      <len>1</len>
+      <unit>ST</unit>
+      <description>Codierung 2, 03 Oel- oder Gasbetrieb</description>
+    </command>
+    <command name="getCod2KMFeuerungsautomat" protocmd="getaddr">
+      <addr>778B</addr>
+      <len>1</len>
+      <unit>ST</unit>
+      <description>Codierung 2, 8B Kennung KM-Feuerungsautomat</description>
     </command>
     <command name="getCod2Schalthysterese" protocmd="getaddr">
       <addr>5704</addr>
