@@ -44,7 +44,7 @@ jobs:
       matrix:
         # The version in go.mod is the floor; the newest release is what most
         # contributors will actually have installed.
-        go: ["1.23", "stable"]
+        go: ["1.25", "stable"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
