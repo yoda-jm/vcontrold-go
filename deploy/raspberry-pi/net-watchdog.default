@@ -1,0 +1,13 @@
+# Settings for net-watchdog. install.sh copies this file to
+# /etc/default/net-watchdog only if it does not exist yet: edit it there, it is
+# local configuration and is never overwritten.
+
+# The interface to watch and repair.
+IFACE=wlan0
+
+# Hosts whose answer proves the link works, separated by spaces. Any one
+# answering is enough: the watchdog repairs the Pi's own Wi-Fi, nothing beyond
+# it. Empty means the default gateway; adding the MQTT broker keeps a gateway
+# that ignores ping from passing for an outage.
+#   TARGETS="192.0.2.1 192.0.2.2"
+TARGETS=""

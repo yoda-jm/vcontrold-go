@@ -20,7 +20,7 @@ TOOLS_BIN           := $(shell go env GOPATH)/bin
 # The community XML and the local archive are not ours to lint or format.
 GO_PKGS := ./cmd/... ./internal/...
 
-.PHONY: help deps build test test-race cover lint fmt tools deploy run-remote probe verify-write clean
+.PHONY: help deps build test test-race cover lint fmt tools deploy setup-pi run-remote probe verify-write clean
 
 help:
 	@echo "deps         fetch the community XML into third_party/"
@@ -31,6 +31,7 @@ help:
 	@echo "lint         gofmt + go vet + staticcheck"
 	@echo "fmt          rewrite the sources with gofmt"
 	@echo "deploy       send binary + config + overrides to $(TARGET_HOST)"
+	@echo "setup-pi     install the Pi's watchdog, journal and service (deploy/raspberry-pi)"
 	@echo "run-remote   run the binary on the target"
 	@echo "probe        show the serial adapter on the target (read-only)"
 	@echo "verify-write exercise the write path without changing any value"
@@ -80,6 +81,12 @@ deploy: build
 	rsync -az overrides $(TARGET_HOST):$(TARGET_DIR)/
 	rsync -az $(BIN) config-openv.yaml $(TARGET_HOST):$(TARGET_DIR)/
 	@echo "deployed to $(TARGET_HOST):$(TARGET_DIR)"
+
+# Everything on a Raspberry Pi target besides the binary: Wi-Fi watchdog,
+# persistent journal, the user service. See deploy/raspberry-pi/README.md.
+setup-pi:
+	rsync -az --delete deploy/raspberry-pi/ $(TARGET_HOST):$(TARGET_DIR)/setup/
+	ssh -t $(TARGET_HOST) '$(TARGET_DIR)/setup/install.sh'
 
 run-remote:
 	ssh -t $(TARGET_HOST) 'cd $(TARGET_DIR) && ./$(BIN) --yaml-config config-openv.yaml'

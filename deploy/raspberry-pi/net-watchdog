@@ -1,0 +1,83 @@
+#!/bin/bash
+# Network tripwire for a Raspberry Pi on weak Wi-Fi. Run every minute by
+# net-watchdog.timer. Each minute none of the targets answers escalates one
+# step:
+#   3 min  -> reconnect the interface through NetworkManager
+#   6 min  -> reload the brcmfmac Wi-Fi driver (the Zero W chip can wedge)
+#   10 min -> reboot, at most once every six hours so a router outage cannot
+#             turn into a reboot loop
+# Every step logs a snapshot to the (persistent) journal, so the next incident
+# leaves evidence.
+#
+# Settings: /etc/default/net-watchdog, see net-watchdog.default.
+set -u
+IFACE=wlan0
+TARGETS=
+# shellcheck source=/dev/null
+[ -r /etc/default/net-watchdog ] && . /etc/default/net-watchdog
+# Without targets, the default gateway. No route at all leaves nothing to ping,
+# which counts as a failed minute.
+[ -n "$TARGETS" ] || TARGETS=$(ip -4 route show default dev "$IFACE" 2>/dev/null | awk '{print $3; exit}')
+
+STATE=/run/net-watchdog.count
+LAST_REBOOT=/var/lib/net-watchdog/last-reboot
+REBOOT_INTERVAL=21600
+log() { logger -t net-watchdog "$*"; }
+
+for t in $TARGETS; do
+    if ping -c 2 -W 3 -I "$IFACE" "$t" >/dev/null 2>&1; then
+        if [ -s "$STATE" ] && [ "$(cat "$STATE")" -gt 0 ]; then
+            log "network back after $(cat "$STATE") failed minute(s) (reached $t)"
+        fi
+        echo 0 > "$STATE"
+        exit 0
+    fi
+done
+
+n=$(( $(cat "$STATE" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$STATE"
+log "minute $n without an answer from ${TARGETS:-the gateway (no default route)}"
+
+snapshot() {
+    log "snapshot: $(ip -br addr show "$IFACE" 2>&1 | tr -s ' ')"
+    log "snapshot: $(nmcli -t -f DEVICE,STATE,CONNECTION dev 2>&1 | tr '\n' ' ')"
+    log "snapshot: $(tail -1 /proc/net/wireless 2>&1 | tr -s ' ')"
+    dmesg | tail -15 | while read -r l; do log "dmesg: $l"; done
+}
+
+case $n in
+3)
+    snapshot
+    log "action: reconnect $IFACE"
+    nmcli dev disconnect "$IFACE" >/dev/null 2>&1
+    sleep 2
+    nmcli dev connect "$IFACE" 2>&1 | logger -t net-watchdog
+    ;;
+6)
+    snapshot
+    log "action: reload brcmfmac"
+    modprobe -r brcmfmac_cyw brcmfmac 2>&1 | logger -t net-watchdog
+    sleep 3
+    modprobe brcmfmac 2>&1 | logger -t net-watchdog
+    ;;
+*)
+    [ "$n" -lt 10 ] && exit 0
+    now=$(date +%s)
+    last=$(cat "$LAST_REBOOT" 2>/dev/null || echo 0)
+    if [ $(( now - last )) -ge "$REBOOT_INTERVAL" ]; then
+        snapshot
+        log "action: reboot"
+        mkdir -p "$(dirname "$LAST_REBOOT")"
+        echo "$now" > "$LAST_REBOOT"
+        sync
+        systemctl reboot
+    elif [ $(( n % 10 )) -eq 0 ]; then
+        # Rebooted less than six hours ago: probably the router, not us.
+        # On 2026-11-17 ten hourly reboots in a row fixed nothing; the link
+        # came back by itself. Each reboot also stops the boiler readings.
+        # Keep retrying the cheap repair every 10 minutes meanwhile.
+        log "reboot skipped (last one under six hours ago); reconnecting $IFACE"
+        nmcli dev connect "$IFACE" 2>&1 | logger -t net-watchdog
+    fi
+    ;;
+esac

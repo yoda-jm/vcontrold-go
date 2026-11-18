@@ -1,0 +1,13 @@
+# Wi-Fi for the first boot (netplan syntax, read by cloud-init). NetworkManager
+# keeps the connection afterwards.
+network:
+  version: 2
+  wifis:
+    wlan0:
+      dhcp4: true
+      optional: true
+      # Country code: which channels and transmit power are legal.
+      regulatory-domain: FR
+      access-points:
+        "CHANGEME_SSID":
+          password: "CHANGEME_PASSPHRASE"

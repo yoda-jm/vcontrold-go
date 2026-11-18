@@ -1,0 +1,28 @@
+# systemd user unit: install.sh puts it in ~/.config/systemd/user/. It needs
+# lingering (loginctl enable-linger, also done by install.sh) to start at boot
+# with nobody logged in.
+#
+# No After=network-online.target: that is a system unit, which the user
+# manager cannot see, so the line would be silently ignored. The daemon starts
+# before the Wi-Fi is up and retries the broker every 30 seconds by itself;
+# readings meanwhile go to the ledger.
+
+[Unit]
+Description=vcontrold-go: Optolink reader and MQTT publisher
+
+[Service]
+Type=simple
+WorkingDirectory=%h/vcontrold-go
+ExecStart=%h/vcontrold-go/vcontrold-go --yaml-config config-openv.yaml
+
+# The serial port vanishes when the adapter is unplugged: restart, but slowly
+# enough not to hammer it.
+Restart=always
+RestartSec=30s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vcontrold-go
+
+[Install]
+WantedBy=default.target

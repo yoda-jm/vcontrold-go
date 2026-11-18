@@ -60,8 +60,8 @@ not carry.
 
 ## Features
 
-- **KW2 protocol** over Optolink (4800 baud, 8N2, even parity), built from the
-  macros in `vcontrold.xml` rather than hard-coded opcodes.
+- **KW2 protocol** over Optolink (4800 baud, 8E2: even parity, two stop bits),
+  built from the macros in `vcontrold.xml` rather than hard-coded opcodes.
 - **MQTT with Home Assistant discovery** — retained, so entities survive a
   restart, and carrying the `state_class` that keeps history alive.
 - **Climate entities** for the setpoints the controller actually exposes.
@@ -311,6 +311,11 @@ It is a diagnostic view and deliberately shows the protocol names
 
 `make deploy` sends the binary, configuration and overrides to the target host
 named in `.env`; `deploy/vcontrold-go.service` is a systemd template.
+
+The production target is a Raspberry Pi Zero W on weak Wi-Fi.
+[`deploy/raspberry-pi/`](deploy/raspberry-pi/README.md) describes it: the
+Optolink head, the first-boot files, a Wi-Fi watchdog, a persistent journal
+and the user service, all installed by `make setup-pi`, and why each is there.
 
 For a user service, `loginctl enable-linger` is required to survive a reboot —
 and note that the user manager keeps the groups of the session that started it,

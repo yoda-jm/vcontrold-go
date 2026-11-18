@@ -1,0 +1,7 @@
+[Unit]
+Description=Network tripwire: repair Wi-Fi, then reboot, when the network stays unreachable
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/net-watchdog

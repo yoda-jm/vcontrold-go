@@ -1,0 +1,33 @@
+#cloud-config
+# First boot of Raspberry Pi OS Lite. Fill in every CHANGEME, then copy this
+# file and network-config over the ones on the card's boot partition.
+#
+# Only what is needed to log in is here. Everything else is installed by
+# install.sh (make setup-pi), so it can be updated without reflashing.
+hostname: optolink
+manage_etc_hosts: true
+timezone: Europe/Paris
+locale: en_US.UTF-8
+keyboard:
+  layout: fr
+
+users:
+  - name: CHANGEME_USER
+    gecos: CHANGEME_USER
+    shell: /bin/bash
+    # dialout: the Optolink serial port. adm: reading the system journal.
+    groups: [adm, dialout, sudo, video, plugdev, users, netdev]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    # Keep a console password: with the Wi-Fi down, a keyboard and a screen
+    # are the only way in. Hash it with: mkpasswd -m sha-512
+    lock_passwd: false
+    hashed_passwd: CHANGEME_PASSWORD_HASH
+    ssh_authorized_keys:
+      - CHANGEME_SSH_PUBLIC_KEY
+
+ssh_pwauth: false
+package_update: false
+package_upgrade: false
+
+runcmd:
+  - [systemctl, enable, --now, ssh]
