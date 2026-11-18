@@ -50,6 +50,21 @@ func (t *runtimeTracker) changed(alias, payload string) bool {
 	return true
 }
 
+// forget drops what was published, so every total goes out again after a
+// reconnection.
+func (t *runtimeTracker) forget() {
+	t.mutex.Lock()
+	t.published = make(map[string]string)
+	t.mutex.Unlock()
+}
+
+// total returns the accumulated run time of an output alias, in hours.
+func (t *runtimeTracker) total(alias string) float64 {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.seconds[alias] / 3600
+}
+
 // maxCreditableGap bounds how much unobserved time may be credited between two
 // samples.
 //
@@ -188,16 +203,20 @@ func (p *Publisher) PublishRuntimeDiscovery(runtimes []config.MQTTRuntimeConfig,
 	if len(runtimes) == 0 {
 		return nil
 	}
+
+	// The tracker runs whether or not the broker answers: run time missed
+	// while it does not could never be recovered.
+	p.runtimeConfigs = runtimes
+	p.runtimeStatePath = statePath
+	if p.runtime == nil {
+		p.runtime = newRuntimeTracker(statePath)
+	}
+
 	if err := p.readyToDiscover(); err != nil {
-		if err == errDiscoveryDisabled {
+		if err == errDiscoveryDisabled || err == errNotConnected {
 			return nil
 		}
 		return err
-	}
-
-	p.runtimeConfigs = runtimes
-	if p.runtime == nil {
-		p.runtime = newRuntimeTracker(statePath)
 	}
 
 	for _, r := range runtimes {
@@ -257,8 +276,15 @@ func (p *Publisher) handleRuntime(sourceAlias, cleanedValue string, now time.Tim
 			continue
 		}
 
-		topic := p.stateTopic(r.Alias)
 		payload := fmt.Sprintf("%.4f", hours)
+		entry := ledgerEntry{Time: now, Alias: r.Alias, Value: payload}
+
+		// Checked before changed(), which would otherwise record as sent a
+		// total that never left. It goes out on reconnection instead.
+		if !p.online() {
+			p.ledger.record(entry, false)
+			continue
+		}
 
 		// While the pump is off the total does not move, and republishing it
 		// every minute would be noise.
@@ -266,15 +292,36 @@ func (p *Publisher) handleRuntime(sourceAlias, cleanedValue string, now time.Tim
 			continue
 		}
 
-		if token := p.client.Publish(topic, 0, true, payload); token.Wait() && token.Error() != nil {
-			logging.Error("Failed to publish run-time %s: %v", topic, token.Error())
-			continue
-		}
-		logging.Debug("RUNTIME: %s = %s h", topic, payload)
+		p.ledger.record(entry, p.publishRuntime(r.Alias, payload) && p.haOnline.Load())
 	}
 
 	if err := p.runtime.save(); err != nil {
 		logging.Warn("Could not persist the run-time counters: %v", err)
+	}
+}
+
+// publishRuntime sends one run-time total and reports whether it left.
+func (p *Publisher) publishRuntime(alias, payload string) bool {
+	topic := p.stateTopic(alias)
+	if token := p.client.Publish(topic, 0, true, payload); token.Wait() && token.Error() != nil {
+		logging.Error("Failed to publish run-time %s: %v", topic, token.Error())
+		return false
+	}
+	logging.Debug("RUNTIME: %s = %s h", topic, payload)
+	return true
+}
+
+// republishRuntime sends every total again after a reconnection.
+func (p *Publisher) republishRuntime() {
+	if p.runtime == nil || !p.online() {
+		return
+	}
+	p.runtime.forget()
+	for _, r := range p.runtimeConfigs {
+		payload := fmt.Sprintf("%.4f", p.runtime.total(r.Alias))
+		if p.runtime.changed(r.Alias, payload) {
+			p.publishRuntime(r.Alias, payload)
+		}
 	}
 }
 

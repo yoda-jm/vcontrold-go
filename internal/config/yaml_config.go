@@ -76,6 +76,10 @@ type YamlConfig struct {
 	// Where the run-time totals are persisted. Empty places the file beside
 	// the configuration.
 	RuntimeStateFile string `yaml:"runtime_state_file,omitempty" json:"runtime_state_file,omitempty"`
+
+	// Where readings that could not be delivered are written, one CSV file per
+	// day. Empty places a "ledger" directory beside the configuration.
+	LedgerDir string `yaml:"ledger_dir,omitempty" json:"ledger_dir,omitempty"`
 }
 
 // MQTTScheduleConfig gathers a circuit's seven daily programmes into one entity.

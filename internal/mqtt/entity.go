@@ -24,6 +24,10 @@ const (
 	availabilityOffline = "offline"
 )
 
+// haStatusTopic is where Home Assistant announces itself, with the same two
+// payloads: "online" when it starts, "offline" as its last will.
+const haStatusTopic = "homeassistant/status"
+
 type discoveryDevice struct {
 	Identifiers  []string `json:"identifiers"`
 	Name         string   `json:"name"`
@@ -110,8 +114,8 @@ func (p *Publisher) readyToDiscover() error {
 	if !p.enabled || p.config == nil {
 		return errDiscoveryDisabled
 	}
-	if p.client == nil || !p.client.IsConnected() {
-		return fmt.Errorf("cannot publish discovery: MQTT client not connected")
+	if !p.online() {
+		return errNotConnected
 	}
 	return nil
 }
@@ -119,6 +123,10 @@ func (p *Publisher) readyToDiscover() error {
 // errDiscoveryDisabled means MQTT is off; callers treat it as "nothing to do"
 // rather than as a failure.
 var errDiscoveryDisabled = fmt.Errorf("mqtt disabled")
+
+// errNotConnected means discovery has to wait for the broker. It is not a
+// failure either: everything is announced on connection.
+var errNotConnected = fmt.Errorf("cannot publish discovery: MQTT client not connected")
 
 // slugify reduces a label to a Home Assistant identifier: lowercase, no
 // accents, words joined by underscores.

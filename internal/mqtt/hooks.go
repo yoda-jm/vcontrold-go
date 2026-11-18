@@ -7,6 +7,7 @@ import (
 	"github.com/yoda-jm/vcontrold-go/internal/logging"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -29,7 +30,7 @@ type HookManager struct {
 	reader    *viessmann.Reader
 	client    mqtt.Client
 	hooks     []MQTTHook
-	connected bool
+	connected atomic.Bool
 }
 
 // NewHookManager creates a new MQTT hook manager
@@ -47,7 +48,7 @@ func (hm *HookManager) AddHook(hook MQTTHook) {
 	logging.Info("MQTT Hook registered: %s -> %s", hook.Topic, hook.Description)
 
 	// Subscribe if already connected
-	if hm.connected && hm.client != nil && hook.Enabled {
+	if hm.connected.Load() && hm.client != nil && hook.Enabled {
 		hm.subscribeToHook(hook)
 	}
 }
@@ -58,7 +59,7 @@ func (hm *HookManager) LoadHooks(hooks []MQTTHook) {
 	logging.Info("MQTT: Loaded %d hooks from configuration", len(hooks))
 
 	// Subscribe to all enabled hooks if connected
-	if hm.connected && hm.client != nil {
+	if hm.connected.Load() && hm.client != nil {
 		for _, hook := range hm.hooks {
 			if hook.Enabled {
 				hm.subscribeToHook(hook)
@@ -84,7 +85,13 @@ func (hm *HookManager) Connect() error {
 	opts := mqtt.NewClientOptions().
 		AddBroker(fmt.Sprintf("tcp://%s", mqttConfig.Host)).
 		SetClientID(clientID).
-		SetCleanSession(true)
+		SetCleanSession(true).
+		// Retried for ever, like the publisher: a hook that gave up at boot
+		// would leave Home Assistant's thermostats silently ineffective.
+		SetConnectRetry(true).
+		SetConnectRetryInterval(connectRetryInterval).
+		SetAutoReconnect(true).
+		SetMaxReconnectInterval(maxReconnectInterval)
 
 	// Set credentials if provided
 	if mqttConfig.Username != "" {
@@ -96,13 +103,13 @@ func (hm *HookManager) Connect() error {
 
 	// Connection handlers
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		logging.Info("MQTT Hooks: Connection lost: %v", err)
-		hm.connected = false
+		logging.Warn("MQTT Hooks: Connection lost: %v; reconnecting", err)
+		hm.connected.Store(false)
 	})
 
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		logging.Info("MQTT Hooks: Connected to broker %s", mqttConfig.Host)
-		hm.connected = true
+		hm.connected.Store(true)
 
 		// Subscribe to all enabled hooks
 		for _, hook := range hm.hooks {
@@ -112,11 +119,15 @@ func (hm *HookManager) Connect() error {
 		}
 	})
 
-	// Connect
+	// Connect in the background: the subscriptions are made by the handler
+	// above, on the first connection and on every reconnection.
 	hm.client = mqtt.NewClient(opts)
-	if token := hm.client.Connect(); token.Wait() && token.Error() != nil {
-		return fmt.Errorf("MQTT hooks connection failed: %v", token.Error())
-	}
+	token := hm.client.Connect()
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			logging.Error("MQTT Hooks: Gave up connecting to broker %s: %v", mqttConfig.Host, token.Error())
+		}
+	}()
 
 	return nil
 }
@@ -446,7 +457,7 @@ func (hm *HookManager) findModeAddress(zone string) (uint16, bool) {
 
 // publishHookStatus publishes status messages for hooks
 func (hm *HookManager) publishHookStatus(topic string, payload map[string]interface{}) {
-	if hm.client == nil || !hm.connected {
+	if hm.client == nil || !hm.connected.Load() {
 		return
 	}
 
@@ -464,9 +475,10 @@ func (hm *HookManager) publishHookStatus(topic string, payload map[string]interf
 
 // Disconnect closes the MQTT connection
 func (hm *HookManager) Disconnect() {
-	if hm.client != nil && hm.connected {
+	if hm.client != nil {
+		// Also stops the connection retries if it never connected.
 		hm.client.Disconnect(250)
-		hm.connected = false
+		hm.connected.Store(false)
 		logging.Info("MQTT Hooks: Disconnected")
 	}
 }
@@ -490,7 +502,7 @@ func (hm *HookManager) GetStatus() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"connected":     hm.connected,
+		"connected":     hm.connected.Load(),
 		"total_hooks":   len(hm.hooks),
 		"enabled_hooks": enabledHooks,
 		"hooks":         hookList,

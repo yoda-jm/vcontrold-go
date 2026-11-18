@@ -135,7 +135,7 @@ func (c *ParameterCache) Set(address uint16, reading Reading) {
 			cached.ChangeCount = existing.ChangeCount + 1
 			eventType = EventValueChanged
 			previousValue = existing.FormattedValue
-			logging.Info("Cache updated: 0x%04X value changed from '%s' to '%s' (change #%d)",
+			logging.Debug("Cache updated: 0x%04X value changed from '%s' to '%s' (change #%d)",
 				address, existing.FormattedValue, reading.FormattedValue, cached.ChangeCount)
 		} else {
 			// Value didn't change, keep existing timestamps

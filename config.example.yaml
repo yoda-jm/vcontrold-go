@@ -496,3 +496,10 @@ mqtt_runtime:
     alias: pumpSpHours
     friendly_name: Heures pompe de charge ballon
     icon: mdi:pump
+
+# Readings that could not be delivered — broker unreachable, Home Assistant
+# down — are written here, one CSV file per day, with the hour before the
+# failure was noticed. Nothing is written while delivery works. Rebuild the
+# long-term statistics afterwards with scripts/ha_backfill_ledger.py.
+# Empty places a "ledger" directory beside this file.
+# ledger_dir: /home/user/vcontrold-go/ledger

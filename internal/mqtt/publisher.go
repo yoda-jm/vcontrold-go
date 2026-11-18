@@ -4,10 +4,12 @@ package mqtt
 import (
 	"fmt"
 	"github.com/yoda-jm/vcontrold-go/internal/logging"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -51,7 +53,32 @@ type Publisher struct {
 
 	// Per-address settings, indexed by address, for the checks that need them.
 	addressSettings map[uint16]config.MQTTAddress
+
+	// Last accepted reading per address, republished on every connection so
+	// Home Assistant is current at once rather than at the next change.
+	latest map[uint16]viessmann.CacheEvent
+
+	// Readings that may not have reached Home Assistant. Nil disables it.
+	ledger *ledger
+
+	// haOnline follows Home Assistant's status topic. While Home Assistant is
+	// down the broker still accepts our messages, but nobody records them.
+	haOnline atomic.Bool
+
+	// What was announced, kept to announce it again after a reconnection.
+	climates         []config.MQTTClimateConfig
+	runtimeStatePath string
+	announceMutex    sync.Mutex
 }
+
+// The broker is retried for ever. Giving up after the first failure is what
+// lost two days of readings in November 2026: the target booted before its
+// Wi-Fi, the only connection attempt failed, and the daemon went on reading
+// the boiler while publishing nothing until someone restarted it.
+const (
+	connectRetryInterval = 30 * time.Second
+	maxReconnectInterval = time.Minute
+)
 
 // NewPublisher creates a new MQTT publisher
 func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
@@ -63,8 +90,12 @@ func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
 		config:        mqttConfig,
 		lastPublished: make(map[uint16]*LastPublish),
 		addressMap:    make(map[uint16]string),
+		latest:        make(map[uint16]viessmann.CacheEvent),
 		enabled:       mqttConfig.Enabled,
 	}
+	// Until Home Assistant says otherwise: its birth message is not retained,
+	// so a daemon starting while it runs would never hear it.
+	p.haOnline.Store(true)
 
 	// Build address to alias mapping
 	p.addressSettings = make(map[uint16]config.MQTTAddress)
@@ -78,7 +109,8 @@ func NewPublisher(mqttConfig *config.MQTTConfig) *Publisher {
 	}
 	p.guard = newCounterGuard()
 
-	// Initialize MQTT client if enabled
+	// The client is built here and connected by Start, once the entities to
+	// announce are known.
 	if mqttConfig.Enabled {
 		p.initMQTTClient()
 	}
@@ -100,7 +132,11 @@ func (p *Publisher) initMQTTClient() {
 		AddBroker(fmt.Sprintf("tcp://%s", p.config.Host)).
 		SetClientID(clientID).
 		SetCleanSession(true).
-		SetWill(availabilityTopic, availabilityOffline, 0, true)
+		SetWill(availabilityTopic, availabilityOffline, 0, true).
+		SetConnectRetry(true).
+		SetConnectRetryInterval(connectRetryInterval).
+		SetAutoReconnect(true).
+		SetMaxReconnectInterval(maxReconnectInterval)
 
 	// Set credentials if provided
 	if p.config.Username != "" {
@@ -112,7 +148,7 @@ func (p *Publisher) initMQTTClient() {
 
 	// Set connection handlers
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		logging.Info("MQTT: Connection lost: %v", err)
+		logging.Warn("MQTT: Connection lost: %v; reconnecting, readings go to the ledger meanwhile", err)
 	})
 
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
@@ -123,13 +159,135 @@ func (p *Publisher) initMQTTClient() {
 		if token := client.Publish(availabilityTopic, 0, true, availabilityOnline); token.Wait() && token.Error() != nil {
 			logging.Error("MQTT: Failed to announce availability: %v", token.Error())
 		}
+
+		if token := client.Subscribe(haStatusTopic, 0, p.handleHAStatus); token.Wait() && token.Error() != nil {
+			logging.Warn("MQTT: Cannot follow %s: %v", haStatusTopic, token.Error())
+		}
+
+		// Off the client's goroutine: announcing waits on dozens of tokens.
+		go p.announce()
 	})
 
-	// Create and connect client
 	p.client = mqtt.NewClient(opts)
-	if token := p.client.Connect(); token.Wait() && token.Error() != nil {
-		logging.Error("MQTT: Failed to connect to broker %s: %v", p.config.Host, token.Error())
-		p.enabled = false
+}
+
+// Start connects to the broker in the background and returns at once. The
+// boiler is read whether or not the broker answers; until it does, readings go
+// to the ledger.
+func (p *Publisher) Start() {
+	if !p.enabled || p.client == nil {
+		return
+	}
+	logging.Info("MQTT: Connecting to broker %s, retrying every %s until it answers", p.config.Host, connectRetryInterval)
+	token := p.client.Connect()
+	go func() {
+		// With ConnectRetry the token completes only once connected, or on an
+		// error retrying cannot fix, such as invalid options.
+		if token.Wait() && token.Error() != nil {
+			logging.Error("MQTT: Gave up connecting to broker %s: %v", p.config.Host, token.Error())
+		}
+	}()
+}
+
+// EnableLedger keeps a record of the readings that may not have reached Home
+// Assistant, in dir.
+func (p *Publisher) EnableLedger(dir string) {
+	// Absolute, so the log says where to look rather than "ledger".
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	p.ledger = newLedger(dir)
+	logging.Info("Ledger: undelivered readings will be written to %s", dir)
+}
+
+// online reports whether a publish would actually leave now. IsConnected is not
+// enough: with automatic reconnection it also answers true while reconnecting,
+// and paho then completes QoS 0 publishes without sending them.
+func (p *Publisher) online() bool {
+	return p.client != nil && p.client.IsConnectionOpen()
+}
+
+// delivering reports whether a reading published now would be recorded by Home
+// Assistant, as far as the daemon can know.
+func (p *Publisher) delivering() bool {
+	return p.online() && p.haOnline.Load()
+}
+
+// handleHAStatus follows Home Assistant's birth and last-will messages.
+func (p *Publisher) handleHAStatus(_ mqtt.Client, msg mqtt.Message) {
+	switch string(msg.Payload()) {
+	case availabilityOnline:
+		if !p.haOnline.Swap(true) {
+			logging.Info("MQTT: Home Assistant is back online")
+		}
+		// Home Assistant asks for this: a restarted instance relies on the
+		// integrations announcing themselves again.
+		go p.announce()
+	case availabilityOffline:
+		if p.haOnline.Swap(false) {
+			logging.Warn("MQTT: Home Assistant went offline; readings go to the ledger until it returns")
+		}
+	}
+}
+
+// announce publishes every discovery message and the current values. It runs on
+// every connection, so entities configured while the broker was unreachable
+// are not left unannounced.
+func (p *Publisher) announce() {
+	p.announceMutex.Lock()
+	defer p.announceMutex.Unlock()
+
+	if err := p.PublishDiscovery(); err != nil {
+		logging.Warn("MQTT discovery not published: %v", err)
+		return
+	}
+	for _, step := range []struct {
+		name    string
+		publish func() error
+	}{
+		{"climate", func() error { return p.PublishClimateDiscovery(p.climates) }},
+		{"derived", func() error { return p.PublishDerivedDiscovery(p.derivedConfigs) }},
+		{"raw mirror", p.PublishRawMirrorDiscovery},
+		{"run-time", func() error { return p.PublishRuntimeDiscovery(p.runtimeConfigs, p.runtimeStatePath) }},
+		{"schedule", func() error { return p.PublishScheduleDiscovery(p.scheduleConfigs) }},
+	} {
+		if err := step.publish(); err != nil {
+			logging.Warn("MQTT %s discovery not published: %v", step.name, err)
+		}
+	}
+	p.republish()
+}
+
+// republish sends the latest known values. Without it an unchanged reading, a
+// counter at night for instance, would stay missing until the hourly refresh.
+func (p *Publisher) republish() {
+	p.mutex.RLock()
+	events := make([]viessmann.CacheEvent, 0, len(p.latest))
+	for _, e := range p.latest {
+		events = append(events, e)
+	}
+	aliases := make(map[uint16]string, len(p.addressMap))
+	for k, v := range p.addressMap {
+		aliases[k] = v
+	}
+	p.mutex.RUnlock()
+
+	sent := 0
+	for _, e := range events {
+		if alias, ok := aliases[e.Address]; ok && p.publishReading(e, alias) {
+			sent++
+		}
+	}
+
+	if p.derived != nil {
+		p.derived.forget()
+		p.publishDerived()
+	}
+	p.republishRuntime()
+	p.republishSchedules()
+
+	if sent > 0 {
+		logging.Info("MQTT: Republished %d current value(s)", sent)
 	}
 }
 
@@ -157,13 +315,16 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 		return
 	}
 
-	cleanedForRuntime := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
+	cleaned := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
+	now := time.Now()
 
 	// Integrate on/off datapoints on every observation, before any publish
 	// suppression. Republishing is throttled to once an hour for an unchanged
 	// value, and a tracker fed only by those would see a one-hour gap between
 	// samples, credit nothing, and silently report zero run time forever.
-	p.handleRuntime(alias, cleanedForRuntime, time.Now())
+	p.handleRuntime(alias, cleaned, now)
+
+	entry := ledgerEntry{Time: now, Address: event.Address, Alias: alias, Value: cleaned}
 
 	shouldPublish, reason := p.shouldPublish(event)
 	if !shouldPublish {
@@ -171,34 +332,52 @@ func (p *Publisher) HandleCacheEvent(event viessmann.CacheEvent) {
 		// several times a minute. Logging it as a warning buries the real ones
 		// and makes the journal unreadable.
 		logging.Debug("MQTT: Skipping publish for 0x%04X (%s): %s", event.Address, alias, reason)
+		p.remember(event)
+		p.ledger.record(entry, p.delivering())
 		return
 	}
 
 	// A counter that cannot be true must not leave the daemon: filtering it in
-	// Home Assistant would be too late, the row is already written.
+	// Home Assistant would be too late, the row is already written. Nor may it
+	// reach the ledger, from which it would be imported later.
 	settings := p.settingsFor(event.Address)
-	if p.guard != nil && !p.guard.accept(alias, cleanedForRuntime, settings.MaxIncreasePerHour, time.Now()) {
+	if p.guard != nil && !p.guard.accept(alias, cleaned, settings.MaxIncreasePerHour, now) {
 		return
 	}
 
-	// Publish to MQTT
-	topic := fmt.Sprintf("%s/%s", p.config.TopicRoot, alias)
-	p.publishValue(topic, event.Reading.FormattedValue, event.Address, alias)
+	p.remember(event)
+	delivered := p.publishReading(event, alias)
+	p.ledger.record(entry, delivered && p.haOnline.Load())
+}
+
+// remember keeps a reading for the republication after a reconnection.
+func (p *Publisher) remember(event viessmann.CacheEvent) {
+	p.mutex.Lock()
+	p.latest[event.Address] = event
+	p.mutex.Unlock()
+}
+
+// publishReading sends one reading, with its raw mirror, and reports whether it
+// left. Only a reading that left counts as published: otherwise an unchanged
+// value would wait an hour to be sent again after a reconnection.
+func (p *Publisher) publishReading(event viessmann.CacheEvent, alias string) bool {
+	if !p.publishValue(p.stateTopic(alias), event.Reading.FormattedValue, event.Address, alias) {
+		return false
+	}
 
 	// A text value has no long-term history in Home Assistant. Where the
 	// configuration asks for it, mirror the raw protocol value as a number.
-	if settings.RawAlias != "" {
+	if settings := p.settingsFor(event.Address); settings.RawAlias != "" {
 		p.publishRawMirror(settings.RawAlias, event.Reading.RawValue)
 	}
 
-	// Update last published timestamp with cleaned value
-	cleanedValue := p.cleanValueForHomeAssistant(event.Reading.FormattedValue)
 	p.mutex.Lock()
 	p.lastPublished[event.Address] = &LastPublish{
 		Timestamp: time.Now(),
-		Value:     cleanedValue,
+		Value:     p.cleanValueForHomeAssistant(event.Reading.FormattedValue),
 	}
 	p.mutex.Unlock()
+	return true
 }
 
 // shouldPublish determines if a value should be published based on change and time rules
@@ -264,11 +443,14 @@ func (p *Publisher) cleanValueForHomeAssistant(value string) string {
 	return value
 }
 
-// publishValue publishes a value to MQTT
-func (p *Publisher) publishValue(topic, value string, address uint16, alias string) {
-	if p.client == nil || !p.client.IsConnected() {
-		logging.Error("MQTT: Cannot publish %s = '%s' - client not connected", topic, value)
-		return
+// publishValue publishes a value to MQTT and reports whether it left.
+func (p *Publisher) publishValue(topic, value string, address uint16, alias string) bool {
+	if !p.online() {
+		// Debug: during an outage this would fire on every reading. The
+		// outage itself is logged once, by the connection handler and the
+		// ledger.
+		logging.Debug("MQTT: Not connected, %s = '%s' not published", topic, value)
+		return false
 	}
 
 	// Clean the value for Home Assistant
@@ -278,16 +460,17 @@ func (p *Publisher) publishValue(topic, value string, address uint16, alias stri
 	token := p.client.Publish(topic, 0, true, cleanedValue)
 	if token.Wait() && token.Error() != nil {
 		logging.Error("MQTT: Failed to publish %s = '%s': %v", topic, cleanedValue, token.Error())
-		return
+		return false
 	}
 
-	logging.Info("MQTT PUBLISHED: %s = '%s' (0x%04X -> %s) [cleaned from: '%s']", topic, cleanedValue, address, alias, value)
+	logging.Debug("MQTT PUBLISHED: %s = '%s' (0x%04X -> %s) [cleaned from: '%s']", topic, cleanedValue, address, alias, value)
 
 	// A reading just changed, so anything derived from it may have too.
 	if p.derived != nil {
 		p.derived.record(alias, cleanedValue)
 		p.publishDerived()
 	}
+	return true
 }
 
 // UpdateConfig updates the MQTT configuration
@@ -295,8 +478,8 @@ func (p *Publisher) UpdateConfig(newConfig *config.MQTTConfig) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
-	// Disconnect existing client if any
-	if p.client != nil && p.client.IsConnected() {
+	// Disconnect existing client if any, which also stops its retries
+	if p.client != nil {
 		logging.Info("MQTT: Disconnecting existing client for config update")
 		p.client.Disconnect(250)
 	}
@@ -318,6 +501,7 @@ func (p *Publisher) UpdateConfig(newConfig *config.MQTTConfig) {
 		// Reconnect with new config if enabled
 		if newConfig.Enabled {
 			p.initMQTTClient()
+			p.Start()
 		}
 	}
 
@@ -350,14 +534,11 @@ func (p *Publisher) GetStatus() map[string]interface{} {
 		}
 	}
 
-	connected := false
-	if p.client != nil {
-		connected = p.client.IsConnected()
-	}
-
 	return map[string]interface{}{
 		"enabled":          p.enabled,
-		"connected":        connected,
+		"connected":        p.online(),
+		"haOnline":         p.haOnline.Load(),
+		"ledger":           p.ledger.status(),
 		"broker":           p.config.Host,
 		"refreshThreshold": threshold,
 		"monitoredCount":   len(p.addressMap),
@@ -402,6 +583,9 @@ func (p *Publisher) publishRawMirror(alias string, raw interface{}) {
 		value = value<<8 | uint64(data[i])
 	}
 
+	if !p.online() {
+		return
+	}
 	topic := p.stateTopic(alias)
 	payload := strconv.FormatUint(value, 10)
 	if token := p.client.Publish(topic, 0, true, payload); token.Wait() && token.Error() != nil {
@@ -414,7 +598,7 @@ func (p *Publisher) publishRawMirror(alias string, raw interface{}) {
 // PublishRawMirrorDiscovery announces the numeric mirrors to Home Assistant.
 func (p *Publisher) PublishRawMirrorDiscovery() error {
 	if err := p.readyToDiscover(); err != nil {
-		if err == errDiscoveryDisabled {
+		if err == errDiscoveryDisabled || err == errNotConnected {
 			return nil
 		}
 		return err
@@ -466,7 +650,13 @@ func (p *Publisher) Shutdown() {
 		}
 	}
 
-	if p.client == nil || !p.client.IsConnected() {
+	p.ledger.close()
+
+	if !p.online() {
+		if p.client != nil {
+			// Stops the connection retries.
+			p.client.Disconnect(0)
+		}
 		return
 	}
 

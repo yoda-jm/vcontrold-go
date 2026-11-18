@@ -190,6 +190,33 @@ topic read openv/#
 > success. Use `mosquitto_pub -V 5` to see the real reason code: `135` is Not
 > authorized, `16` is accepted with no subscriber.
 
+### When the broker or Home Assistant is unreachable
+
+The boiler is read whether or not anyone is listening. The broker is retried
+every 30 seconds, from start-up and after any loss, and every connection
+announces the entities again and republishes the latest values, so Home
+Assistant is current at once rather than at the next change. The daemon also
+follows `homeassistant/status`, and announces again when Home Assistant
+restarts.
+
+Replaying the missed readings over MQTT would be wrong: Home Assistant stamps
+a value when it arrives, so hours of readings would land on one instant. They
+go to a **ledger** instead, `ledger/YYYY-MM-DD.csv` beside the configuration
+(`ledger_dir` to move it):
+
+- while delivery works, the last hour sits in memory and nothing is written;
+- once it has failed for a minute, that hour and every reading after it are
+  written, until delivery is back. The hour before matters: a dead connection
+  is only noticed after the MQTT keep-alive, and QoS 0 publishes into it report
+  success;
+- files older than 90 days are removed.
+
+[`scripts/ha_backfill_ledger.py`](scripts/ha_backfill_ledger.py) then rebuilds
+the hourly long-term statistics from those files and imports them, without
+overwriting any hour Home Assistant already has. States themselves cannot be
+inserted after the fact, so the history panel shows the gap until the recorder
+purges that period and falls back on the statistics.
+
 ### Weekly schedules
 
 A circuit's programme lives at seven addresses, one per weekday. Publishing them
@@ -256,6 +283,11 @@ Every serial frame is traced, so a value can be verified by hand:
 
 Levels: `debug`, `info` (default), `warn`, `error`. `-verbose` is shorthand for
 `debug`.
+
+Individual readings and publishes are logged at `debug` only. At `info` they
+filled a 64 MB journal in about thirty hours, so an incident had rotated out of
+the log before anyone looked at it. At `info` the journal now holds what
+happened: connections, losses, ledger activity, writes, failed reads.
 
 ---
 

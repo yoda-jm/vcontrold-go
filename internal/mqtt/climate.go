@@ -43,8 +43,10 @@ func (p *Publisher) PublishClimateDiscovery(climates []config.MQTTClimateConfig)
 	if len(climates) == 0 {
 		return nil
 	}
+	// Kept to announce them again after a reconnection.
+	p.climates = climates
 	if err := p.readyToDiscover(); err != nil {
-		if err == errDiscoveryDisabled {
+		if err == errDiscoveryDisabled || err == errNotConnected {
 			return nil
 		}
 		return err

@@ -153,7 +153,7 @@ func (ar *AutoRefresher) refreshLoop() {
 
 // refreshAddresses refreshes all configured addresses
 func (ar *AutoRefresher) refreshAddresses() {
-	logging.Info("Auto refresh: reading %d addresses", len(ar.addresses))
+	logging.Debug("Auto refresh: reading %d addresses", len(ar.addresses))
 
 	dataPoints := ar.reader.GetDataPoints()
 	addressToDP := make(map[uint16]config.DataPoint)
@@ -174,7 +174,7 @@ func (ar *AutoRefresher) refreshAddresses() {
 				reading := ar.reader.ReadParameter(dp, index)
 				if reading.Success {
 					successCount++
-					logging.Info("Auto refresh: 0x%04X (%s) = %s", address, dp.Name, reading.FormattedValue)
+					logging.Debug("Auto refresh: 0x%04X (%s) = %s", address, dp.Name, reading.FormattedValue)
 				} else {
 					logging.Error("Auto refresh: 0x%04X (%s) failed: %s", address, dp.Name, reading.Error)
 				}
@@ -187,7 +187,7 @@ func (ar *AutoRefresher) refreshAddresses() {
 		time.Sleep(protocol.KW2_READ_DELAY_MS * time.Millisecond)
 	}
 
-	logging.Info("Auto refresh completed: %d/%d successful", successCount, len(ar.addresses))
+	logging.Debug("Auto refresh completed: %d/%d successful", successCount, len(ar.addresses))
 }
 
 // getAddressStrings returns addresses as hex strings for status display

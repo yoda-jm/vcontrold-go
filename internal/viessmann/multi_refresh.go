@@ -199,7 +199,10 @@ func (mgr *MultiGroupRefresher) refreshGroupLoop(group config.RefreshGroup, tick
 
 // refreshGroup refreshes all addresses in a specific group
 func (mgr *MultiGroupRefresher) refreshGroup(group config.RefreshGroup) {
-	logging.Info("Group '%s': refreshing %d addresses", group.Name, len(group.Addresses))
+	// Every reading below is logged at debug only. At info they filled the
+	// journal's 64 MB in about thirty hours, so an outage was gone from the
+	// log before anyone looked at it.
+	logging.Debug("Group '%s': refreshing %d addresses", group.Name, len(group.Addresses))
 
 	dataPoints := mgr.reader.GetDataPoints()
 	addressToDP := make(map[uint16]config.DataPoint)
@@ -227,7 +230,7 @@ func (mgr *MultiGroupRefresher) refreshGroup(group config.RefreshGroup) {
 				reading := mgr.reader.ReadParameter(dp, index)
 				if reading.Success {
 					successCount++
-					logging.Info("Group '%s': 0x%04X (%s) = %s", group.Name, address, dp.Name, reading.FormattedValue)
+					logging.Debug("Group '%s': 0x%04X (%s) = %s", group.Name, address, dp.Name, reading.FormattedValue)
 				} else {
 					logging.Error("Group '%s': 0x%04X (%s) failed: %s", group.Name, address, dp.Name, reading.Error)
 				}
@@ -240,5 +243,9 @@ func (mgr *MultiGroupRefresher) refreshGroup(group config.RefreshGroup) {
 		time.Sleep(protocol.KW2_READ_DELAY_MS * time.Millisecond)
 	}
 
-	logging.Info("Group '%s' completed: %d/%d successful", group.Name, successCount, len(addresses))
+	if successCount < len(addresses) {
+		logging.Warn("Group '%s' completed: %d/%d successful", group.Name, successCount, len(addresses))
+		return
+	}
+	logging.Debug("Group '%s' completed: %d/%d successful", group.Name, successCount, len(addresses))
 }

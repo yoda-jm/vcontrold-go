@@ -118,7 +118,7 @@ func resolveMetadata(addr config.MQTTAddress, hexAddr uint16, binary bool) senso
 // PublishDiscovery announces one retained entity per monitored address.
 func (p *Publisher) PublishDiscovery() error {
 	if err := p.readyToDiscover(); err != nil {
-		if err == errDiscoveryDisabled {
+		if err == errDiscoveryDisabled || err == errNotConnected {
 			return nil
 		}
 		return err

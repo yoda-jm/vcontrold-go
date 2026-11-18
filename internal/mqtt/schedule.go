@@ -64,6 +64,31 @@ func (s *scheduleState) changed(alias, summary string) bool {
 	return true
 }
 
+// forget drops what was published, so everything goes out again after a
+// reconnection.
+func (s *scheduleState) forget() {
+	s.mutex.Lock()
+	s.published = make(map[string]string)
+	s.mutex.Unlock()
+}
+
+// completeWeeks returns the schedules whose seven days are all known.
+func (s *scheduleState) completeWeeks() map[string][7]string {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	weeks := make(map[string][7]string)
+	for alias, week := range s.days {
+		complete := true
+		for _, day := range week {
+			complete = complete && day != ""
+		}
+		if complete {
+			weeks[alias] = week
+		}
+	}
+	return weeks
+}
+
 // summariseWeek renders seven daily schedules as one line.
 //
 // Consecutive days sharing a programme are collapsed into a range, so a week
@@ -98,20 +123,16 @@ func (p *Publisher) PublishScheduleDiscovery(schedules []config.MQTTScheduleConf
 	if len(schedules) == 0 {
 		return nil
 	}
-	if err := p.readyToDiscover(); err != nil {
-		if err == errDiscoveryDisabled {
-			return nil
-		}
-		return err
-	}
 
+	// Configured whether or not the broker answers, so the days read while it
+	// does not are not lost.
 	p.scheduleConfigs = schedules
 	if p.schedules == nil {
 		p.schedules = newScheduleState()
 	}
 
 	// Index the addresses so a reading can be attributed to its weekday.
-	p.scheduleIndex = make(map[uint16]scheduleSlot)
+	index := make(map[uint16]scheduleSlot)
 	for _, sched := range schedules {
 		for day, address := range sched.Addresses {
 			if day >= len(dayNames) {
@@ -123,9 +144,19 @@ func (p *Publisher) PublishScheduleDiscovery(schedules []config.MQTTScheduleConf
 				logging.Warn("Schedule %q: invalid address %q: %v", sched.Alias, address, err)
 				continue
 			}
-			p.scheduleIndex[hexAddr] = scheduleSlot{alias: sched.Alias, day: day}
+			index[hexAddr] = scheduleSlot{alias: sched.Alias, day: day}
 		}
+	}
+	p.scheduleIndex = index
 
+	if err := p.readyToDiscover(); err != nil {
+		if err == errDiscoveryDisabled || err == errNotConnected {
+			return nil
+		}
+		return err
+	}
+
+	for _, sched := range schedules {
 		objectID := sanitizeObjectID(sched.Alias)
 		if objectID == "" {
 			continue
@@ -169,13 +200,35 @@ func (p *Publisher) handleSchedule(address uint16, value string) {
 	if !complete {
 		return
 	}
+	p.publishSchedule(slot.alias, week)
+}
 
-	summary := summariseWeek(week)
-	if !p.schedules.changed(slot.alias, summary) {
+// republishSchedules sends every complete week again after a reconnection.
+func (p *Publisher) republishSchedules() {
+	if p.schedules == nil {
+		return
+	}
+	p.schedules.forget()
+	for alias, week := range p.schedules.completeWeeks() {
+		p.publishSchedule(alias, week)
+	}
+}
+
+// publishSchedule sends one week's summary if it changed since it was last
+// sent.
+func (p *Publisher) publishSchedule(alias string, week [7]string) {
+	// Checked before changed(), which would otherwise record as sent a
+	// summary that never left.
+	if !p.online() {
 		return
 	}
 
-	topic := p.stateTopic(slot.alias)
+	summary := summariseWeek(week)
+	if !p.schedules.changed(alias, summary) {
+		return
+	}
+
+	topic := p.stateTopic(alias)
 	if token := p.client.Publish(topic, 0, true, summary); token.Wait() && token.Error() != nil {
 		logging.Error("Failed to publish schedule %s: %v", topic, token.Error())
 		return

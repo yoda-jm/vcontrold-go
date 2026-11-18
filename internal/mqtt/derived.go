@@ -59,6 +59,14 @@ func (d *derivedState) changed(alias, payload string) bool {
 	return true
 }
 
+// forget drops what was published, so everything goes out again after a
+// reconnection.
+func (d *derivedState) forget() {
+	d.mutex.Lock()
+	d.published = make(map[string]string)
+	d.mutex.Unlock()
+}
+
 // compute evaluates one derived value. It returns false when either term is
 // still unknown, or when the ratio is undefined.
 func computeDerived(d config.MQTTDerivedConfig, state *derivedState) (string, bool) {
@@ -90,7 +98,7 @@ func (p *Publisher) publishDerived() {
 	if p.config == nil || len(p.derivedConfigs) == 0 || p.derived == nil {
 		return
 	}
-	if p.client == nil || !p.client.IsConnected() {
+	if !p.online() {
 		return
 	}
 
@@ -105,7 +113,7 @@ func (p *Publisher) publishDerived() {
 			logging.Error("MQTT derived: failed to publish %s: %v", topic, token.Error())
 			continue
 		}
-		logging.Info("MQTT DERIVED: %s = %s", topic, payload)
+		logging.Debug("MQTT DERIVED: %s = %s", topic, payload)
 	}
 }
 
@@ -114,17 +122,19 @@ func (p *Publisher) PublishDerivedDiscovery(derived []config.MQTTDerivedConfig) 
 	if len(derived) == 0 {
 		return nil
 	}
-	if err := p.readyToDiscover(); err != nil {
-		if err == errDiscoveryDisabled {
-			return nil
-		}
-		return err
-	}
 
-	// Keep the configuration around for the recomputation on every reading.
+	// Keep the configuration around for the recomputation on every reading,
+	// connected or not.
 	p.derivedConfigs = derived
 	if p.derived == nil {
 		p.derived = newDerivedState()
+	}
+
+	if err := p.readyToDiscover(); err != nil {
+		if err == errDiscoveryDisabled || err == errNotConnected {
+			return nil
+		}
+		return err
 	}
 
 	for _, d := range derived {

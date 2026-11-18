@@ -51,13 +51,11 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 		s.mqttPublisher = mqtt.NewPublisher(nil)
 	}
 
-	// Announce the entities before the first reading: discovery messages are
+	// Declare the entities before connecting. They are announced on every
+	// connection to the broker, not once here: discovery messages are
 	// retained, so Home Assistant finds them again on every restart, and it is
-	// their state_class that triggers long-term statistics.
-	if err := s.mqttPublisher.PublishDiscovery(); err != nil {
-		logging.Warn("MQTT discovery not published: %v", err)
-	}
-
+	// their state_class that triggers long-term statistics. The calls below
+	// configure them; until the broker answers they publish nothing.
 	if cfg.YamlConfig != nil {
 		if err := s.mqttPublisher.PublishClimateDiscovery(cfg.YamlConfig.Climates); err != nil {
 			logging.Warn("MQTT climate discovery not published: %v", err)
@@ -84,7 +82,16 @@ func NewServer(reader *viessmann.Reader, cfg *config.Config) *Server {
 		if err := s.mqttPublisher.PublishScheduleDiscovery(cfg.YamlConfig.Schedules); err != nil {
 			logging.Warn("MQTT schedule discovery not published: %v", err)
 		}
+
+		// Readings that cannot be delivered are kept, so the long-term
+		// statistics can be rebuilt after an outage.
+		ledgerDir := cfg.YamlConfig.LedgerDir
+		if ledgerDir == "" {
+			ledgerDir = mqtt.DefaultLedgerDir(cfg.YamlConfigFile)
+		}
+		s.mqttPublisher.EnableLedger(ledgerDir)
 	}
+	s.mqttPublisher.Start()
 
 	// Initialize MQTT hook manager
 	s.hookManager = mqtt.NewHookManager(cfg, reader)
